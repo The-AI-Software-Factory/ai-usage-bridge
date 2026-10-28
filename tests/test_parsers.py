@@ -213,3 +213,17 @@ def test_claude_expired_without_refresh(tmp_path):
         raise AssertionError("debía fallar")
     except TokenExpired as exc:
         assert "Configurar AI Usage Bridge" in str(exc)
+
+
+def test_credentials_change_triggers_poll(tmp_path):
+    cred = tmp_path / ".credentials.json"
+    cfg = {"mqtt": {"host": "x"}, "claude": {"credentials_path": str(cred)},
+           "codex": {"enabled": False}, "cursor": {"enabled": False}}
+    r = Runner(cfg, publish=False)
+    p = r.providers[0]
+    r.poll(p)
+    assert r.states["claude"]["status"] == "sin_credenciales"
+    assert not r.credentials_changed(p)
+    cred.write_text("{}")  # aparece el archivo (por ejemplo, después de /login)
+    assert r.credentials_changed(p)
+    assert not r.credentials_changed(p)

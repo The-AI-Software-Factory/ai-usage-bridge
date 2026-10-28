@@ -47,6 +47,7 @@ class Runner:
         self.states: dict[str, dict] = {}
         self.last_good: dict[str, dict] = {}
         self.next_run = {p.key: 0.0 for p in self.providers}
+        self.cred_mtime: dict[str, float | None] = {p.key: self._mtime(p) for p in self.providers}
         self.min_margin = float(cfg.get("general", {}).get("min_margin", 5))
         self.stop_event = threading.Event()
         self.publisher = None
@@ -54,6 +55,23 @@ class Runner:
             devices = [(p.key, p.name, p.model, p.entities) for p in self.providers]
             devices.append((summary.KEY, summary.NAME, summary.MODEL, summary.ENTITIES))
             self.publisher = Publisher(cfg["mqtt"], devices, announce=announce)
+
+    @staticmethod
+    def _mtime(p: Provider) -> float | None:
+        """Fecha de modificación del archivo de credenciales del proveedor (si tiene)."""
+        try:
+            path = getattr(p, "path", None)
+            return path.stat().st_mtime if path else None
+        except (OSError, ValueError):
+            return None
+
+    def credentials_changed(self, p: Provider) -> bool:
+        """True si el proveedor está con error y su archivo de credenciales cambió."""
+        current = self._mtime(p)
+        changed = current != self.cred_mtime.get(p.key)
+        self.cred_mtime[p.key] = current
+        state = self.states.get(p.key) or {}
+        return changed and state.get("status") not in (None, "ok")
 
     def poll(self, p: Provider) -> dict:
         started = now_utc()
@@ -104,6 +122,9 @@ class Runner:
             now = time.monotonic()
             changed = False
             for p in self.providers:
+                if self.credentials_changed(p):
+                    log.info("%s: cambiaron las credenciales, se vuelve a leer", p.key)
+                    self.next_run[p.key] = now
                 if now >= self.next_run[p.key]:
                     self.publisher.publish_state(p.key, self.poll(p))
                     changed = True
