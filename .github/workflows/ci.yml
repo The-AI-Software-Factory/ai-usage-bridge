@@ -106,7 +106,21 @@ jobs:
           $cfg = Get-Content "$env:ProgramData\AIUsageBridge\config.toml" -Raw
           if ($cfg -notmatch 'host = "127.0.0.1"') { throw 'MQTT host was not written to config.toml' }
           if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\AI Usage Bridge\Configurar AI Usage Bridge.lnk")) { throw 'Start menu shortcut missing' }
+          if ('${{ matrix.kind }}' -ne 'zip' -and $cfg -notmatch 'refresh_token_enabled = true') { throw 'Claude token renewal should be on by default' }
           & "$env:ProgramData\AIUsageBridge\python\python.exe" -m ai_usage_bridge --version
+      - name: Upgrade keeps the broker settings
+        if: matrix.kind == 'setup'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $p = Start-Process dist\AIUsageBridge-Setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLAUDEREFRESH=0', '/LOG=upgrade.log' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Setup exit code $($p.ExitCode)" }
+          Start-Sleep -Seconds 5
+          $cfg = Get-Content "$env:ProgramData\AIUsageBridge\config.toml" -Raw
+          if ($cfg -notmatch 'host = "127.0.0.1"') { throw 'Upgrade lost the MQTT host' }
+          if ($cfg -notmatch 'refresh_token_enabled = false') { throw 'Upgrade did not apply the Claude option' }
+          if ((Get-Service AIUsageBridge).Status -ne 'Running') { throw 'Service is not running after upgrade' }
+          'Upgrade OK'
       - name: Uninstall
         shell: powershell
         run: |

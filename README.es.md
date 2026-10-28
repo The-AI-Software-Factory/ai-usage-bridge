@@ -102,7 +102,7 @@ Get-FileHash .\AIUsageBridge-Setup.exe -Algorithm SHA256
 
 ### 2. Instalar
 
-**Setup.exe:** ejecutalo, aceptá la licencia, ingresá host o IP del broker, puerto (por defecto `1883`), usuario y contraseña (vacíos si el broker es anónimo), y terminá.
+**Setup.exe:** ejecutalo, aceptá la licencia, ingresá host o IP del broker, puerto (por defecto `1883`), usuario y contraseña (vacíos si el broker es anónimo), elegí si querés [renovar automáticamente el token de Claude](#mantener-actualizados-los-datos-de-claude), y terminá.
 
 **MSI:** ejecutalo y, en la última pantalla, dejá marcado **"Configure the MQTT broker now"** para cargar los datos del broker.
 
@@ -130,13 +130,13 @@ Elijas el que elijas, el instalador:
 
 ```powershell
 # Setup.exe
-.\AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=homeassistant /MQTTPASSWORD=tu-contraseña
+.\AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=homeassistant /MQTTPASSWORD=tu-contraseña /CLAUDEREFRESH=1
 
 # MSI
-msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=homeassistant MQTT_PASSWORD=tu-contraseña
+msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=homeassistant MQTT_PASSWORD=tu-contraseña CLAUDE_REFRESH=1
 
 # Zip (desde un PowerShell como administrador, dentro de la carpeta descomprimida)
-.\install.ps1 -Unattended -MqttHost 192.168.1.10 -MqttPort 1883 -MqttUser homeassistant -MqttPassword 'tu-contraseña'
+.\install.ps1 -Unattended -MqttHost 192.168.1.10 -MqttPort 1883 -MqttUser homeassistant -MqttPassword 'tu-contraseña' -ClaudeRefresh true
 ```
 
 Lo que pasás por línea de comandos puede quedar visible para otros procesos mientras corre el instalador; en equipos compartidos, preferí el modo interactivo. Si no pasás el broker, el servicio se instala y espera hasta que ejecutes **Configurar AI Usage Bridge**.
@@ -227,16 +227,24 @@ Restart-Service AIUsageBridge
 | `<servicio>.enabled` | `true` | Activa o desactiva `claude`, `codex` o `cursor` |
 | `<servicio>.interval_seconds` | 300 / 120 / 300 | Intervalo de consulta (Claude / Codex / Cursor) |
 | `claude.credentials_path` | `%USERPROFILE%\.claude\.credentials.json` | Credenciales de Claude Code |
-| `claude.refresh_token_enabled` | `false` | Permite que el servicio renueve el token de Claude Code (ver abajo) |
+| `claude.refresh_token_enabled` | `true` con los instaladores | Permite que el servicio renueve el token de Claude Code (ver abajo) |
 | `codex.auth_path` | `%USERPROFILE%\.codex\auth.json` | Credenciales de Codex |
 | `cursor.state_db` | `%APPDATA%\Cursor\User\globalStorage\state.vscdb` | Base de estado local de Cursor |
 | `cursor.amounts_in_cents` | `true` | Cursor informa los montos on‑demand en centavos |
 
 ### Mantener actualizados los datos de Claude
 
-El token de Claude Code dura unas horas y se renueva cuando usás Claude Code. Si usás sobre todo los chats de claude.ai, el token vence y el estado de Claude pasa a `token_vencido` hasta que vuelvas a abrir Claude Code.
+El uso de Claude se lee con el login de Claude Code, cuyo token dura unas horas. **Claude Code (terminal) solo lo renueva cuando lo usás.** Si usás Claude sobre todo desde la app de escritorio o claude.ai, el token de `.credentials.json` queda viejo y el estado de Claude muestra `token_vencido`.
 
-Con `refresh_token_enabled = true` en `[claude]`, el servicio lo renueva por su cuenta. El token nuevo se reescribe de forma atómica en el archivo de credenciales de Claude Code, así que Claude Code sigue funcionando. Si Claude Code lo renovó antes, el servicio usa ese y no pisa nada.
+Por eso los instaladores activan la **renovación automática** por defecto (pantalla *Claude* del asistente del Setup.exe, `/CLAUDEREFRESH=1`, o `CLAUDE_REFRESH=1` en el MSI). Se puede activar o desactivar después con **Configurar AI Usage Bridge**, o con `refresh_token_enabled` en `[claude]`.
+
+Cómo funciona:
+
+- El servicio renueva el token **solo cuando ya venció**, así no compite con una sesión activa de Claude Code.
+- El token nuevo se reescribe de forma atómica en el archivo de credenciales de Claude Code, conservando el resto de los campos, así Claude Code sigue funcionando.
+- Si Claude Code lo renovó antes, el servicio usa ese y no pisa nada.
+
+Si la renovación es rechazada (el refresh token guardado fue revocado o es muy viejo), el estado lo indica. Abrí una terminal, ejecutá `claude` y luego `/login` una vez; desde ahí el servicio mantiene el token renovado.
 
 Los tokens de Codex y Cursor duran más y los renuevan sus propias apps; el bridge solo los lee.
 
@@ -264,7 +272,7 @@ Mirá el sensor **Estado** de cada servicio; su atributo `error` tiene el detall
 |---|---|---|
 | `ok` | La última lectura funcionó | — |
 | `sin_credenciales` | La herramienta no está instalada o logueada en esta PC, o la ruta es otra | Iniciá sesión o corregí la ruta en `config.toml` |
-| `token_vencido` | El token guardado venció o fue rechazado | Abrí la herramienta una vez; para Claude, ver [Mantener actualizados los datos de Claude](#mantener-actualizados-los-datos-de-claude) |
+| `token_vencido` | El token guardado venció o fue rechazado | Para Claude, ver [Mantener actualizados los datos de Claude](#mantener-actualizados-los-datos-de-claude); para Codex o Cursor, abrí la app una vez |
 | `rate_limited` | El proveedor pidió bajar la frecuencia | Nada: el servicio espera y reintenta. No bajes los intervalos por debajo de los valores por defecto |
 | `error` | Error de red o respuesta inesperada | Corré el diagnóstico de abajo y abrí un issue |
 
@@ -287,7 +295,7 @@ Si un proveedor cambió el formato de su respuesta, `--dump` muestra la forma nu
 
 - **Sin credenciales nuevas.** El bridge reutiliza las sesiones que Claude Code, Codex y Cursor ya guardan en tu PC.
 - **Los tokens no salen de tu PC**, salvo hacia el proveedor que los emitió, por HTTPS. Nunca se publican en MQTT, ni se escriben en los logs, ni aparecen en la salida de `--dump`.
-- **Solo lectura por defecto.** El único archivo que puede escribir fuera de su carpeta es el de credenciales de Claude Code, y solo si activás `refresh_token_enabled`.
+- **Escrituras mínimas.** El único archivo que escribe fuera de su carpeta es el de credenciales de Claude Code, y solo con la renovación automática activada y el token ya vencido.
 - **Config protegida.** `config.toml` solo lo pueden leer `SYSTEM` y los administradores.
 - **Corre como `LocalSystem`**, la cuenta por defecto de los servicios de Windows, para poder leer los archivos de tu perfil sin guardar tu contraseña de Windows.
 - MQTT viaja sin cifrar salvo que actives `tls`. Mantené el broker en una red de confianza.

@@ -125,3 +125,78 @@ def test_discovery_payloads():
     assert len(uids) == len(set(uids))
     json.dumps([m[1] for m in msgs])
     print(len(msgs), "entidades")
+
+
+# --- Renovación del token de Claude -------------------------------------------
+
+class _Resp:
+    def __init__(self, status, body=None, headers=None):
+        self.status_code, self._body, self.headers, self.text = status, body or {}, headers or {}, ""
+
+    def json(self):
+        return self._body
+
+
+class _FakeHttp:
+    def __init__(self, token_responses):
+        self.token_responses = dict(token_responses)
+        self.posts, self.gets = [], []
+
+    def post(self, url, **kw):
+        self.posts.append(url)
+        return self.token_responses.get(url, _Resp(404))
+
+    def get(self, url, headers=None, **kw):
+        self.gets.append(headers["Authorization"])
+        return _Resp(200, {"five_hour": {"utilization": 7, "resets_at": FUTURE}})
+
+
+def _expired_creds(tmp_path):
+    path = tmp_path / ".credentials.json"
+    path.write_text(json.dumps({"claudeAiOauth": {
+        "accessToken": "old", "refreshToken": "r1", "expiresAt": 1000,
+        "subscriptionType": "max", "scopes": ["user:inference"]}, "otro": 1}))
+    return path
+
+
+def test_claude_refresh_ok(tmp_path):
+    from ai_usage_bridge.providers.claude import TOKEN_URLS
+    path = _expired_creds(tmp_path)
+    http = _FakeHttp({TOKEN_URLS[0]: _Resp(200, {"access_token": "new", "refresh_token": "r2", "expires_in": 28800})})
+    p = ClaudeProvider({"credentials_path": str(path), "refresh_token_enabled": True}, http)
+    st = p.parse(p.fetch_raw())
+    assert st["h5_used"] == 7.0 and http.gets == ["Bearer new"]
+    saved = json.loads(path.read_text())
+    assert saved["claudeAiOauth"]["accessToken"] == "new" and saved["claudeAiOauth"]["refreshToken"] == "r2"
+    assert saved["claudeAiOauth"]["scopes"] == ["user:inference"] and saved["otro"] == 1
+    assert saved["claudeAiOauth"]["expiresAt"] > time.time() * 1000
+
+
+def test_claude_refresh_fallback_url(tmp_path):
+    from ai_usage_bridge.providers.claude import TOKEN_URLS
+    http = _FakeHttp({TOKEN_URLS[1]: _Resp(200, {"access_token": "new2", "expires_in": 3600})})
+    p = ClaudeProvider({"credentials_path": str(_expired_creds(tmp_path)), "refresh_token_enabled": True}, http)
+    p.fetch_raw()
+    assert http.posts == list(TOKEN_URLS) and http.gets == ["Bearer new2"]
+
+
+def test_claude_refresh_rejected(tmp_path):
+    from ai_usage_bridge.providers.claude import TOKEN_URLS
+    http = _FakeHttp({TOKEN_URLS[0]: _Resp(400, {"error": "invalid_grant"})})
+    path = _expired_creds(tmp_path)
+    p = ClaudeProvider({"credentials_path": str(path), "refresh_token_enabled": True}, http)
+    try:
+        p.fetch_raw()
+        raise AssertionError("debía fallar")
+    except TokenExpired as exc:
+        assert "/login" in str(exc)
+    assert json.loads(path.read_text())["claudeAiOauth"]["accessToken"] == "old"
+
+
+def test_claude_expired_without_refresh(tmp_path):
+    p = ClaudeProvider({"credentials_path": str(_expired_creds(tmp_path))}, _FakeHttp({}))
+    try:
+        p.fetch_raw()
+        raise AssertionError("debía fallar")
+    except TokenExpired as exc:
+        assert "Configurar AI Usage Bridge" in str(exc)

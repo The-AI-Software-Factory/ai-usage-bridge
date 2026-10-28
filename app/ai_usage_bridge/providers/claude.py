@@ -11,12 +11,17 @@ import os
 import time
 from pathlib import Path
 
+import logging
+
+import requests
+
 from ..util import iso, now_utc, num, parse_time, pct
 from .base import (
     COMMON_ENTITIES,
     CredentialsMissing,
     Provider,
     ProviderError,
+    RateLimited,
     TokenExpired,
     check_response,
     pct_entity,
@@ -24,8 +29,17 @@ from .base import (
 )
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+# Endpoint actual de Claude Code y el anterior como respaldo.
+TOKEN_URLS = (
+    "https://platform.claude.com/v1/oauth/token",
+    "https://console.anthropic.com/v1/oauth/token",
+)
 CLAUDE_CODE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+log = logging.getLogger(__name__)
+RELOGIN_HINT = (
+    "Abrí una terminal, ejecutá 'claude' y luego '/login' una vez; "
+    "con refresh_token_enabled = true el servicio lo mantiene renovado"
+)
 
 
 class ClaudeProvider(Provider):
@@ -69,19 +83,48 @@ class ClaudeProvider(Provider):
         """Renueva el token y lo vuelve a escribir para que Claude Code siga funcionando."""
         refresh_token = oauth.get("refreshToken")
         if not refresh_token:
-            raise TokenExpired("Token vencido y sin refreshToken")
-        resp = self.http.post(
-            self.cfg.get("token_url", TOKEN_URL),
-            json={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": self.cfg.get("client_id", CLAUDE_CODE_CLIENT_ID),
-            },
-            timeout=self.timeout,
-        )
-        if resp.status_code >= 400:
-            raise TokenExpired(f"No se pudo renovar el token de Claude (HTTP {resp.status_code})")
-        body = resp.json()
+            raise TokenExpired(f"El token de Claude Code venció y no hay refreshToken. {RELOGIN_HINT}")
+        urls = [self.cfg["token_url"]] if self.cfg.get("token_url") else list(TOKEN_URLS)
+        payload = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": self.cfg.get("client_id", CLAUDE_CODE_CLIENT_ID),
+        }
+        body = None
+        last_error = "sin respuesta"
+        for url in urls:
+            try:
+                resp = self.http.post(url, json=payload, timeout=self.timeout,
+                                      headers={"Accept": "application/json"})
+            except requests.RequestException as exc:
+                last_error = f"{url}: {exc.__class__.__name__}"
+                continue
+            if resp.status_code == 429:
+                try:
+                    retry = float(resp.headers.get("retry-after", "900"))
+                except ValueError:
+                    retry = 900.0
+                raise RateLimited("Claude: renovación de token limitada (HTTP 429)", max(retry, 300.0))
+            if resp.status_code in (400, 401, 403):
+                # invalid_grant: el refresh token ya no sirve (vencido o usado por otro proceso).
+                raise TokenExpired(
+                    f"Claude rechazó la renovación del token (HTTP {resp.status_code}). {RELOGIN_HINT}"
+                )
+            if resp.status_code >= 400:
+                last_error = f"{url}: HTTP {resp.status_code}"
+                continue
+            try:
+                body = resp.json()
+            except ValueError:
+                last_error = f"{url}: respuesta no JSON"
+                continue
+            if body.get("access_token"):
+                break
+            last_error = f"{url}: respuesta sin access_token"
+            body = None
+        if body is None:
+            raise ProviderError(f"No se pudo renovar el token de Claude ({last_error})")
+        log.info("claude: token de Claude Code renovado")
         # Si Claude Code renovó el token mientras tanto, usamos el suyo y no pisamos nada.
         current_data, current = self._read_creds()
         if current.get("refreshToken") != refresh_token:
@@ -105,8 +148,9 @@ class ClaudeProvider(Provider):
         if expires is not None and expires.timestamp() < time.time() + 60:
             if not refresh_enabled:
                 raise TokenExpired(
-                    f"El token de Claude Code venció ({iso(expires)}). Abrí Claude Code para "
-                    "renovarlo o activá refresh_token_enabled en config.toml"
+                    f"El token de Claude Code venció ({iso(expires)}). Si usás Claude desde la app "
+                    "o la web, activá la renovación automática (menú Inicio > Configurar AI Usage "
+                    "Bridge, o refresh_token_enabled = true en config.toml); si no, abrí Claude Code"
                 )
             token = self._refresh(data, oauth)
 

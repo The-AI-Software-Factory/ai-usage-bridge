@@ -21,6 +21,8 @@ param(
     [string]$MqttUser,
     [string]$MqttPassword,
     [string]$MqttPasswordFile,
+    # "true"/"false": renovar automaticamente el token de Claude Code.
+    [string]$ClaudeRefresh,
     # El MSI registra su propia entrada en "Aplicaciones instaladas".
     [switch]$NoArpEntry,
     [switch]$Unattended
@@ -28,7 +30,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ServiceId = 'AIUsageBridge'
-$Version = '1.0.0'
+$Version = '1.0.1'
 $WinSWUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe'
 $WinSWSha256 = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
 $Src = $PSScriptRoot
@@ -54,7 +56,7 @@ if (-not (Test-Admin)) {
 }
 
 # El MSI antepone "=" a cada valor para no pasar nunca argumentos vacios.
-foreach ($name in @('MqttHost', 'MqttPort', 'MqttUser', 'MqttPassword')) {
+foreach ($name in @('MqttHost', 'MqttPort', 'MqttUser', 'MqttPassword', 'ClaudeRefresh')) {
     $value = Get-Variable -Name $name -ValueOnly
     if ($value -and $value.StartsWith('=')) { Set-Variable -Name $name -Value $value.Substring(1) }
 }
@@ -192,12 +194,12 @@ try {
     icacls $config /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
 
     $mqttArgs = @{ InstallDir = $InstallDir; PythonExe = $python; NoRestart = $true; Unattended = $true }
-    foreach ($k in @('MqttHost', 'MqttPort', 'MqttUser', 'MqttPassword', 'MqttPasswordFile')) {
+    foreach ($k in @('MqttHost', 'MqttPort', 'MqttUser', 'MqttPassword', 'MqttPasswordFile', 'ClaudeRefresh')) {
         $value = Get-Variable -Name $k -ValueOnly
         if ("$value" -ne '') { $mqttArgs[$k] = $value }
     }
     $hasHost = [regex]::IsMatch([IO.File]::ReadAllText($config), '(?m)^\s*host\s*=\s*"[^"]+"')
-    if ($mqttArgs.ContainsKey('MqttHost') -or $mqttArgs.ContainsKey('MqttPasswordFile')) {
+    if ($mqttArgs.ContainsKey('MqttHost') -or $mqttArgs.ContainsKey('MqttPasswordFile') -or $mqttArgs.ContainsKey('ClaudeRefresh')) {
         Write-Step 'Guardando los datos del broker MQTT'
         & (Join-Path $InstallDir 'configure.ps1') @mqttArgs
     } elseif (-not $hasHost -and -not $Unattended) {

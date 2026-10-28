@@ -15,6 +15,8 @@ param(
     [string]$MqttPassword,
     # Archivo con la contrasena (se borra despues de leerlo); evita pasarla por linea de comandos.
     [string]$MqttPasswordFile,
+    # "true"/"false": renovar automaticamente el token de Claude Code.
+    [string]$ClaudeRefresh,
     [string]$PythonExe,
     [switch]$NoRestart,
     [switch]$NoPause,
@@ -42,7 +44,7 @@ function ConvertTo-TomlString([string]$Value) { return $Value.Replace('\', '\\')
 function Get-TomlValue([string]$Text, [string]$Key) {
     $m = [regex]::Match($Text, "(?m)^\s*$Key\s*=\s*""((?:[^""\\]|\\.)*)""")
     if ($m.Success) { return $m.Groups[1].Value.Replace('\"', '"').Replace('\\', '\') }
-    $m = [regex]::Match($Text, "(?m)^\s*$Key\s*=\s*(\d+)")
+    $m = [regex]::Match($Text, "(?m)^\s*$Key\s*=\s*(\d+|true|false)")
     if ($m.Success) { return $m.Groups[1].Value }
     return ''
 }
@@ -76,7 +78,7 @@ try {
     $curPass = Get-TomlValue $text 'password'
 
     if (-not $Unattended) {
-        Write-Host 'AI Usage Bridge - configuracion del broker MQTT' -ForegroundColor Green
+        Write-Host 'AI Usage Bridge - configuracion' -ForegroundColor Green
         Write-Host 'Enter mantiene el valor actual.'
     }
 
@@ -109,6 +111,22 @@ try {
         $newPass = if ($typed) { $typed } else { $curPass }
     }
 
+    # Renovacion del token de Claude Code
+    $curRefresh = (Get-TomlValue $text 'refresh_token_enabled') -eq 'true'
+    if ($ClaudeRefresh) {
+        $newRefresh = $ClaudeRefresh.Trim().TrimStart('=') -match '^(1|true|yes|si|s)$'
+    } elseif ($Unattended) {
+        $newRefresh = $curRefresh
+    } else {
+        Write-Host ''
+        Write-Host 'Claude: el token que se lee lo renueva Claude Code (terminal) solo cuando lo usas.'
+        Write-Host 'Si usas Claude desde la app de escritorio o la web, conviene que lo renueve el servicio.'
+        $def = if ($curRefresh) { 'S' } else { 'N' }
+        $ans = Read-Host "Renovar automaticamente el token de Claude? (s/n) [$def]"
+        $newRefresh = if ([string]::IsNullOrWhiteSpace($ans)) { $curRefresh } else { $ans.Trim() -match '^(s|si|y|yes|1|true)$' }
+    }
+
+    $text = Set-TomlLine $text 'refresh_token_enabled' $(if ($newRefresh) { 'true' } else { 'false' })
     $text = Set-TomlLine $text 'host' ('"' + (ConvertTo-TomlString $newHost) + '"')
     $text = Set-TomlLine $text 'port' ([string][int]$newPort)
     $text = Set-TomlLine $text 'username' ('"' + (ConvertTo-TomlString $newUser) + '"')

@@ -8,7 +8,7 @@
 ; "Aplicaciones instaladas", desde donde se desinstala con uninstall.ps1).
 ;
 ; Instalacion silenciosa:
-;   AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=usuario /MQTTPASSWORD=clave
+;   AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=usuario /MQTTPASSWORD=clave /CLAUDEREFRESH=1
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -63,6 +63,11 @@ es.MqttUser=Usuario:
 es.MqttPassword=Contraseña:
 es.MqttHostRequired=Ingresá el host o la IP del broker MQTT.
 es.MqttPortInvalid=El puerto tiene que ser un número entre 1 y 65535.
+es.MqttUpgrade=Ya hay una configuración guardada: dejá el host vacío para conservarla tal cual.
+es.ClaudeTitle=Claude
+es.ClaudeSubtitle=Renovación del token de Claude
+es.ClaudeHelp=El uso de Claude se lee con el login de Claude Code. Ese token lo renueva Claude Code (terminal) solo cuando lo usás. Si usás Claude desde la app de escritorio o la web, marcá esta opción para que lo renueve el servicio. Si usás Claude Code en la terminal todos los días, podés dejarla desmarcada.
+es.ClaudeRefresh=Renovar automáticamente el token de Claude
 es.Installing=Instalando el servicio AI Usage Bridge...
 es.InstallFailed=La instalación del servicio falló. Revisá el log:%n%1
 en.MqttTitle=MQTT broker
@@ -74,6 +79,11 @@ en.MqttUser=Username:
 en.MqttPassword=Password:
 en.MqttHostRequired=Enter the host or IP of the MQTT broker.
 en.MqttPortInvalid=The port must be a number between 1 and 65535.
+en.MqttUpgrade=A configuration is already saved: leave the host empty to keep it as is.
+en.ClaudeTitle=Claude
+en.ClaudeSubtitle=Claude token renewal
+en.ClaudeHelp=Claude usage is read with the Claude Code login. Claude Code (terminal) only renews that token when you use it. If you mostly use Claude from the desktop app or the web, check this option so the service renews it. If you use Claude Code in the terminal every day, you can leave it unchecked.
+en.ClaudeRefresh=Renew the Claude token automatically
 en.Installing=Installing the AI Usage Bridge service...
 en.InstallFailed=The service installation failed. Check the log:%n%1
 
@@ -83,11 +93,23 @@ Source: "{#StageDir}\*"; DestDir: "{tmp}\payload"; Flags: recursesubdirs createa
 [Code]
 var
   MqttPage: TInputQueryWizardPage;
+  ClaudePage: TInputOptionWizardPage;
+
+{ Actualizacion: ya existe config.toml de una instalacion anterior. }
+function IsUpgrade: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{commonappdata}\AIUsageBridge\config.toml'));
+end;
 
 procedure InitializeWizard;
+var
+  Help: String;
 begin
+  Help := CustomMessage('MqttHelp');
+  if IsUpgrade then
+    Help := CustomMessage('MqttUpgrade') + #13#10#13#10 + Help;
   MqttPage := CreateInputQueryPage(wpLicense,
-    CustomMessage('MqttTitle'), CustomMessage('MqttSubtitle'), CustomMessage('MqttHelp'));
+    CustomMessage('MqttTitle'), CustomMessage('MqttSubtitle'), Help);
   MqttPage.Add(CustomMessage('MqttHost'), False);
   MqttPage.Add(CustomMessage('MqttPort'), False);
   MqttPage.Add(CustomMessage('MqttUser'), False);
@@ -96,6 +118,11 @@ begin
   MqttPage.Values[1] := ExpandConstant('{param:MQTTPORT|1883}');
   MqttPage.Values[2] := ExpandConstant('{param:MQTTUSER|}');
   MqttPage.Values[3] := ExpandConstant('{param:MQTTPASSWORD|}');
+
+  ClaudePage := CreateInputOptionPage(MqttPage.ID,
+    CustomMessage('ClaudeTitle'), CustomMessage('ClaudeSubtitle'), CustomMessage('ClaudeHelp'), False, False);
+  ClaudePage.Add(CustomMessage('ClaudeRefresh'));
+  ClaudePage.Values[0] := ExpandConstant('{param:CLAUDEREFRESH|1}') = '1';
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -107,6 +134,8 @@ begin
   begin
     if Trim(MqttPage.Values[0]) = '' then
     begin
+      if IsUpgrade then
+        Exit;
       MsgBox(CustomMessage('MqttHostRequired'), mbError, MB_OK);
       Result := False;
       Exit;
@@ -137,23 +166,32 @@ begin
   if CurStep <> ssPostInstall then
     Exit;
 
-  { La contrasena va por archivo temporal (lo borra configure.ps1), no por linea de comandos. }
-  PassFile := ExpandConstant('{tmp}\mqtt.secret');
-  SetArrayLength(Lines, 1);
-  Lines[0] := MqttPage.Values[3];
-  SaveStringsToUTF8File(PassFile, Lines, False);
-
   Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\payload\install.ps1') + '"' +
     ' -Unattended' +
     ' -UserProfileDir "' + ExpandConstant('{%USERPROFILE}') + '"' +
     ' -AppDataDir "' + ExpandConstant('{userappdata}') + '"' +
-    ' -InstallDir "' + ExpandConstant('{app}') + '"' +
-    ' -MqttPort "' + Clean(MqttPage.Values[1]) + '"' +
-    ' -MqttPasswordFile "' + PassFile + '"';
+    ' -InstallDir "' + ExpandConstant('{app}') + '"';
+  if ClaudePage.Values[0] then
+    Params := Params + ' -ClaudeRefresh true'
+  else
+    Params := Params + ' -ClaudeRefresh false';
+
+  { Solo se tocan los datos del broker si se cargo un host (en una actualizacion se conservan). }
+  PassFile := '';
   if Clean(MqttPage.Values[0]) <> '' then
-    Params := Params + ' -MqttHost "' + Clean(MqttPage.Values[0]) + '"';
-  if Clean(MqttPage.Values[2]) <> '' then
-    Params := Params + ' -MqttUser "' + Clean(MqttPage.Values[2]) + '"';
+  begin
+    { La contrasena va por archivo temporal (lo borra configure.ps1), no por linea de comandos. }
+    PassFile := ExpandConstant('{tmp}\mqtt.secret');
+    SetArrayLength(Lines, 1);
+    Lines[0] := MqttPage.Values[3];
+    SaveStringsToUTF8File(PassFile, Lines, False);
+    Params := Params +
+      ' -MqttHost "' + Clean(MqttPage.Values[0]) + '"' +
+      ' -MqttPort "' + Clean(MqttPage.Values[1]) + '"' +
+      ' -MqttPasswordFile "' + PassFile + '"';
+    if Clean(MqttPage.Values[2]) <> '' then
+      Params := Params + ' -MqttUser "' + Clean(MqttPage.Values[2]) + '"';
+  end;
 
   WizardForm.StatusLabel.Caption := CustomMessage('Installing');
   LogFile := ExpandConstant('{app}\logs\install.log');
@@ -162,5 +200,6 @@ begin
   begin
     SuppressibleMsgBox(FmtMessage(CustomMessage('InstallFailed'), [LogFile]), mbError, MB_OK, IDOK);
   end;
-  DeleteFile(PassFile);
+  if PassFile <> '' then
+    DeleteFile(PassFile);
 end;

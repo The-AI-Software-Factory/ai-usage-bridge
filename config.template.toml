@@ -21,9 +21,10 @@ discovery_prefix = "homeassistant"
 enabled = true
 credentials_path = '__USERPROFILE__\.claude\.credentials.json'
 interval_seconds = 300
-# Si lo activás, el servicio renueva el token de Claude Code cuando vence y lo
-# reescribe en el archivo de credenciales (para que no se quede sin datos si no
-# abrís Claude Code por varias horas).
+# El servicio renueva el token de Claude Code cuando ya venció y lo reescribe en
+# el archivo de credenciales. Necesario si usás Claude desde la app o la web y
+# no abrís Claude Code (terminal) seguido. Lo ajusta el instalador o el
+# configurador del menú Inicio.
 refresh_token_enabled = false
 
 [codex]

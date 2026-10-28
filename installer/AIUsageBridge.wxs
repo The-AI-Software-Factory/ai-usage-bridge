@@ -10,7 +10,7 @@
   que instala el servicio en %ProgramData%\AIUsageBridge. Al desinstalar ejecuta
   uninstall.ps1. Los datos del broker se pueden pasar como propiedades:
 
-    msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=usuario MQTT_PASSWORD=clave
+    msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=usuario MQTT_PASSWORD=clave CLAUDE_REFRESH=1
 
   Si no se pasan, al terminar el asistente se abre "Configurar AI Usage Bridge".
 -->
@@ -32,6 +32,8 @@
     <Property Id="MQTT_PORT" Value="1883" Secure="yes" />
     <Property Id="MQTT_USER" Secure="yes" />
     <Property Id="MQTT_PASSWORD" Secure="yes" Hidden="yes" />
+    <!-- 1 = el servicio renueva el token de Claude Code (recomendado si se usa Claude desde la app o la web) -->
+    <Property Id="CLAUDE_REFRESH" Value="1" Secure="yes" />
 
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/The-AI-Software-Factory/ai-usage-bridge" />
     <Property Id="ARPHELPLINK" Value="https://github.com/The-AI-Software-Factory/ai-usage-bridge/issues" />
@@ -52,7 +54,7 @@
       vacio (install.ps1 lo quita); el "." final evita que la "\" escape la comilla.
     -->
     <SetProperty Id="AUB_Install" Sequence="execute" Before="AUB_Install" Condition="NOT REMOVE"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]install.ps1&quot; -Unattended -NoArpEntry -AppDataDir &quot;[AppDataFolder].&quot; -MqttHost &quot;=[MQTT_HOST]&quot; -MqttPort &quot;=[MQTT_PORT]&quot; -MqttUser &quot;=[MQTT_USER]&quot; -MqttPassword &quot;=[MQTT_PASSWORD]&quot;" />
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]install.ps1&quot; -Unattended -NoArpEntry -AppDataDir &quot;[AppDataFolder].&quot; -MqttHost &quot;=[MQTT_HOST]&quot; -MqttPort &quot;=[MQTT_PORT]&quot; -MqttUser &quot;=[MQTT_USER]&quot; -MqttPassword &quot;=[MQTT_PASSWORD]&quot; -ClaudeRefresh &quot;=[CLAUDE_REFRESH]&quot;" />
     <CustomAction Id="AUB_Install" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
                   Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
 

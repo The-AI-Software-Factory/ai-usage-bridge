@@ -102,7 +102,7 @@ Get-FileHash .\AIUsageBridge-Setup.exe -Algorithm SHA256
 
 ### 2. Install
 
-**Setup.exe:** run it, accept the license, enter your broker's host or IP, port (default `1883`), username and password (leave both empty for an anonymous broker), and finish.
+**Setup.exe:** run it, accept the license, enter your broker's host or IP, port (default `1883`), username and password (leave both empty for an anonymous broker), choose whether to [renew the Claude token automatically](#keeping-claude-data-fresh), and finish.
 
 **MSI:** run it and, on the last page, keep **"Configure the MQTT broker now"** checked to enter the broker details.
 
@@ -133,13 +133,13 @@ Whichever you choose, the installer:
 
 ```powershell
 # Setup.exe
-.\AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=homeassistant /MQTTPASSWORD=your-password
+.\AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=homeassistant /MQTTPASSWORD=your-password /CLAUDEREFRESH=1
 
 # MSI
-msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=homeassistant MQTT_PASSWORD=your-password
+msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=homeassistant MQTT_PASSWORD=your-password CLAUDE_REFRESH=1
 
 # Zip (from an elevated PowerShell, inside the extracted folder)
-.\install.ps1 -Unattended -MqttHost 192.168.1.10 -MqttPort 1883 -MqttUser homeassistant -MqttPassword 'your-password'
+.\install.ps1 -Unattended -MqttHost 192.168.1.10 -MqttPort 1883 -MqttUser homeassistant -MqttPassword 'your-password' -ClaudeRefresh true
 ```
 
 Values passed on the command line can be visible to other processes while the installer runs, so prefer the interactive mode on shared machines. If you omit the broker, the service installs and waits until you run **Configurar AI Usage Bridge**.
@@ -230,16 +230,24 @@ Restart-Service AIUsageBridge
 | `<service>.enabled` | `true` | Turn `claude`, `codex` or `cursor` on or off |
 | `<service>.interval_seconds` | 300 / 120 / 300 | Polling interval (Claude / Codex / Cursor) |
 | `claude.credentials_path` | `%USERPROFILE%\.claude\.credentials.json` | Claude Code credentials |
-| `claude.refresh_token_enabled` | `false` | Let the service renew the Claude Code token (see below) |
+| `claude.refresh_token_enabled` | `true` with the installers | Let the service renew the Claude Code token (see below) |
 | `codex.auth_path` | `%USERPROFILE%\.codex\auth.json` | Codex credentials |
 | `cursor.state_db` | `%APPDATA%\Cursor\User\globalStorage\state.vscdb` | Cursor local state database |
 | `cursor.amounts_in_cents` | `true` | Cursor reports on‑demand amounts in cents |
 
 ### Keeping Claude data fresh
 
-Claude Code's access token lasts a few hours and is renewed when you use Claude Code. If you mostly use claude.ai chats, the token expires and the Claude status becomes `token_vencido` until you open Claude Code again.
+Claude usage is read with Claude Code's login, whose access token lasts a few hours. **Claude Code (terminal) only renews it when you use it.** If you mostly use Claude from the desktop app or claude.ai, the token in `.credentials.json` goes stale and the Claude status shows `token_vencido`.
 
-Set `refresh_token_enabled = true` in `[claude]` to let the service renew it. The new token is written back atomically to Claude Code's credentials file, so Claude Code keeps working. If Claude Code renewed it first, the service uses that token and doesn't overwrite anything.
+That's why the installers enable **automatic renewal** by default (the *Claude* page of the Setup.exe wizard, `/CLAUDEREFRESH=1`, or `CLAUDE_REFRESH=1` in the MSI). You can turn it on or off later with **Configurar AI Usage Bridge**, or with `refresh_token_enabled` in `[claude]`.
+
+How it works:
+
+- The service only renews the token **after it has expired**, so it doesn't compete with an active Claude Code session.
+- The new token is written back atomically to Claude Code's credentials file, keeping every other field, so Claude Code keeps working.
+- If Claude Code renewed it first, the service uses that one and doesn't overwrite anything.
+
+If the renewal is rejected (the stored refresh token was revoked or is too old), the status explains it. Open a terminal, run `claude`, then `/login` once; from then on the service keeps the token renewed.
 
 Codex and Cursor tokens are long‑lived and are renewed by their own apps; the bridge only reads them.
 
@@ -267,7 +275,7 @@ Check the **Estado** (status) sensor of each service; its `error` attribute has 
 |---|---|---|
 | `ok` | Last read succeeded | — |
 | `sin_credenciales` | The tool isn't installed or signed in on this PC, or the path is different | Sign in, or fix the path in `config.toml` |
-| `token_vencido` | The stored token expired or was rejected | Open the tool once; for Claude, see [Keeping Claude data fresh](#keeping-claude-data-fresh) |
+| `token_vencido` | The stored token expired or was rejected | For Claude, see [Keeping Claude data fresh](#keeping-claude-data-fresh); for Codex or Cursor, open the app once |
 | `rate_limited` | The vendor asked to slow down | Nothing; the service waits and retries. Don't lower the intervals below the defaults |
 | `error` | Network error or an unexpected response | Run the diagnostics below and open an issue |
 
@@ -290,7 +298,7 @@ If a vendor changed its response format, `--dump` shows the new shape. Please at
 
 - **No new credentials.** The bridge reuses the sessions already stored by Claude Code, Codex and Cursor on your PC.
 - **Tokens stay local.** They're sent only to the vendor that issued them, over HTTPS. They're never published to MQTT, written to logs or included in `--dump` output.
-- **Read‑only by default.** The only file it can write outside its own folder is the Claude Code credentials file, and only if you enable `refresh_token_enabled`.
+- **Minimal writes.** The only file it writes outside its own folder is the Claude Code credentials file, and only when automatic renewal is on and the token has expired.
 - **Locked‑down config.** `config.toml` is readable only by `SYSTEM` and Administrators.
 - **Runs as `LocalSystem`**, the default for Windows services, so it can read your user profile files without storing your Windows password.
 - MQTT is unencrypted unless you enable `tls`. Keep the broker on a trusted network.
