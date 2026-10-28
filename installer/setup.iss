@@ -63,7 +63,7 @@ es.MqttUser=Usuario:
 es.MqttPassword=Contraseña:
 es.MqttHostRequired=Ingresá el host o la IP del broker MQTT.
 es.MqttPortInvalid=El puerto tiene que ser un número entre 1 y 65535.
-es.MqttUpgrade=Ya hay una configuración guardada: dejá el host vacío para conservarla tal cual.
+es.MqttUpgrade=Se muestra la configuración actual; podés modificarla. Dejá la contraseña vacía para conservar la guardada.
 es.ClaudeTitle=Claude
 es.ClaudeSubtitle=Renovación del token de Claude
 es.ClaudeHelp=El uso de Claude se lee con el login de Claude Code. Ese token lo renueva Claude Code (terminal) solo cuando lo usás. Si usás Claude desde la app de escritorio o la web, marcá esta opción para que lo renueve el servicio. Si usás Claude Code en la terminal todos los días, podés dejarla desmarcada.
@@ -79,7 +79,7 @@ en.MqttUser=Username:
 en.MqttPassword=Password:
 en.MqttHostRequired=Enter the host or IP of the MQTT broker.
 en.MqttPortInvalid=The port must be a number between 1 and 65535.
-en.MqttUpgrade=A configuration is already saved: leave the host empty to keep it as is.
+en.MqttUpgrade=Your current settings are shown; you can change them. Leave the password empty to keep the saved one.
 en.ClaudeTitle=Claude
 en.ClaudeSubtitle=Claude token renewal
 en.ClaudeHelp=Claude usage is read with the Claude Code login. Claude Code (terminal) only renews that token when you use it. If you mostly use Claude from the desktop app or the web, check this option so the service renews it. If you use Claude Code in the terminal every day, you can leave it unchecked.
@@ -95,10 +95,76 @@ var
   MqttPage: TInputQueryWizardPage;
   ClaudePage: TInputOptionWizardPage;
 
+function ConfigPath: String;
+begin
+  Result := ExpandConstant('{commonappdata}\AIUsageBridge\config.toml');
+end;
+
 { Actualizacion: ya existe config.toml de una instalacion anterior. }
 function IsUpgrade: Boolean;
 begin
-  Result := FileExists(ExpandConstant('{commonappdata}\AIUsageBridge\config.toml'));
+  Result := FileExists(ConfigPath);
+end;
+
+{ Lee el valor de una clave de config.toml (las claves usadas son unicas en el archivo). }
+function TomlValue(const Key: String): String;
+var
+  Lines: TArrayOfString;
+  I, J: Integer;
+  Line, Rest: String;
+begin
+  Result := '';
+  if not LoadStringsFromFile(ConfigPath, Lines) then
+    Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Line := Trim(Lines[I]);
+    if Copy(Line, 1, Length(Key)) <> Key then
+      Continue;
+    Rest := Trim(Copy(Line, Length(Key) + 1, Length(Line)));
+    if Copy(Rest, 1, 1) <> '=' then
+      Continue;
+    Rest := Trim(Copy(Rest, 2, Length(Rest)));
+    if Copy(Rest, 1, 1) = '"' then
+    begin
+      { Cadena TOML basica: corta en la comilla de cierre y resuelve \" y \\ }
+      J := 2;
+      while J <= Length(Rest) do
+      begin
+        if Rest[J] = '\' then
+        begin
+          if J < Length(Rest) then
+            Result := Result + Rest[J + 1];
+          J := J + 2;
+        end
+        else if Rest[J] = '"' then
+          Break
+        else
+        begin
+          Result := Result + Rest[J];
+          J := J + 1;
+        end;
+      end;
+    end
+    else
+    begin
+      J := Pos('#', Rest);
+      if J > 0 then
+        Rest := Copy(Rest, 1, J - 1);
+      Result := Trim(Rest);
+    end;
+    Exit;
+  end;
+end;
+
+{ Valor de un parametro de linea de comandos o, si no se paso, de la config actual. }
+function ParamOrConfig(const Param, Key, Default: String): String;
+begin
+  Result := ExpandConstant('{param:' + Param + '|}');
+  if Result = '' then
+    Result := TomlValue(Key);
+  if Result = '' then
+    Result := Default;
 end;
 
 procedure InitializeWizard;
@@ -114,15 +180,21 @@ begin
   MqttPage.Add(CustomMessage('MqttPort'), False);
   MqttPage.Add(CustomMessage('MqttUser'), False);
   MqttPage.Add(CustomMessage('MqttPassword'), True);
-  MqttPage.Values[0] := ExpandConstant('{param:MQTTHOST|}');
-  MqttPage.Values[1] := ExpandConstant('{param:MQTTPORT|1883}');
-  MqttPage.Values[2] := ExpandConstant('{param:MQTTUSER|}');
+  { En una actualizacion se precargan los valores actuales (la contrasena no se muestra). }
+  MqttPage.Values[0] := ParamOrConfig('MQTTHOST', 'host', '');
+  MqttPage.Values[1] := ParamOrConfig('MQTTPORT', 'port', '1883');
+  MqttPage.Values[2] := ParamOrConfig('MQTTUSER', 'username', '');
   MqttPage.Values[3] := ExpandConstant('{param:MQTTPASSWORD|}');
 
   ClaudePage := CreateInputOptionPage(MqttPage.ID,
     CustomMessage('ClaudeTitle'), CustomMessage('ClaudeSubtitle'), CustomMessage('ClaudeHelp'), False, False);
   ClaudePage.Add(CustomMessage('ClaudeRefresh'));
-  ClaudePage.Values[0] := ExpandConstant('{param:CLAUDEREFRESH|1}') = '1';
+  if ExpandConstant('{param:CLAUDEREFRESH|}') <> '' then
+    ClaudePage.Values[0] := ExpandConstant('{param:CLAUDEREFRESH|}') = '1'
+  else if IsUpgrade then
+    ClaudePage.Values[0] := LowerCase(TomlValue('refresh_token_enabled')) = 'true'
+  else
+    ClaudePage.Values[0] := True;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -176,19 +248,23 @@ begin
   else
     Params := Params + ' -ClaudeRefresh false';
 
-  { Solo se tocan los datos del broker si se cargo un host (en una actualizacion se conservan). }
+  { Sin host (solo posible en una actualizacion) se conserva la configuracion del broker. }
   PassFile := '';
   if Clean(MqttPage.Values[0]) <> '' then
   begin
     { La contrasena va por archivo temporal (lo borra configure.ps1), no por linea de comandos. }
-    PassFile := ExpandConstant('{tmp}\mqtt.secret');
-    SetArrayLength(Lines, 1);
-    Lines[0] := MqttPage.Values[3];
-    SaveStringsToUTF8File(PassFile, Lines, False);
     Params := Params +
       ' -MqttHost "' + Clean(MqttPage.Values[0]) + '"' +
-      ' -MqttPort "' + Clean(MqttPage.Values[1]) + '"' +
-      ' -MqttPasswordFile "' + PassFile + '"';
+      ' -MqttPort "' + Clean(MqttPage.Values[1]) + '"';
+    { En una actualizacion, contrasena vacia = conservar la guardada. }
+    if (MqttPage.Values[3] <> '') or not IsUpgrade then
+    begin
+      PassFile := ExpandConstant('{tmp}\mqtt.secret');
+      SetArrayLength(Lines, 1);
+      Lines[0] := MqttPage.Values[3];
+      SaveStringsToUTF8File(PassFile, Lines, False);
+      Params := Params + ' -MqttPasswordFile "' + PassFile + '"';
+    end;
     if Clean(MqttPage.Values[2]) <> '' then
       Params := Params + ' -MqttUser "' + Clean(MqttPage.Values[2]) + '"';
   end;

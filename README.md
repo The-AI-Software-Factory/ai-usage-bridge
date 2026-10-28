@@ -102,7 +102,7 @@ Get-FileHash .\AIUsageBridge-Setup.exe -Algorithm SHA256
 
 ### 2. Install
 
-**Setup.exe:** run it, accept the license, enter your broker's host or IP, port (default `1883`), username and password (leave both empty for an anonymous broker), choose whether to [renew the Claude token automatically](#keeping-claude-data-fresh), and finish.
+**Setup.exe:** run it, accept the license, enter your broker's host or IP, port (default `1883`), username and password (leave both empty for an anonymous broker), choose whether to [renew the Claude token automatically](#keeping-claude-data-fresh), and finish. When updating, the wizard shows your current settings.
 
 **MSI:** run it and, on the last page, keep **"Configure the MQTT broker now"** checked to enter the broker details.
 
@@ -253,7 +253,7 @@ Codex and Cursor tokens are long‑lived and are renewed by their own apps; the 
 
 ## Updating
 
-Download the new release and run it the same way (Setup.exe, MSI or zip). The service is stopped, the app is replaced, and your `config.toml` is kept.
+Download the new release and run it the same way (Setup.exe, MSI or zip). The service is stopped, the app is replaced, and your `config.toml` is kept. The Setup.exe wizard comes prefilled with your current broker and Claude settings; leave the password empty to keep the saved one.
 
 To change the broker at any time, use **Start menu → AI Usage Bridge → Configurar AI Usage Bridge**.
 

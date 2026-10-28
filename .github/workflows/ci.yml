@@ -85,7 +85,7 @@ jobs:
               powershell -NoProfile -ExecutionPolicy Bypass -File zip\ai-usage-bridge\install.ps1 -Unattended -MqttHost 127.0.0.1
             }
             'setup' {
-              $p = Start-Process dist\AIUsageBridge-Setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/MQTTHOST=127.0.0.1', '/LOG=setup.log' -Wait -PassThru
+              $p = Start-Process dist\AIUsageBridge-Setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/MQTTHOST=127.0.0.1', '/MQTTUSER=ci-user', '/MQTTPASSWORD=ci-secret', '/LOG=setup.log' -Wait -PassThru
               Get-Content setup.log -Tail 20
               if ($p.ExitCode -ne 0) { throw "Setup exit code $($p.ExitCode)" }
             }
@@ -118,6 +118,7 @@ jobs:
           Start-Sleep -Seconds 5
           $cfg = Get-Content "$env:ProgramData\AIUsageBridge\config.toml" -Raw
           if ($cfg -notmatch 'host = "127.0.0.1"') { throw 'Upgrade lost the MQTT host' }
+          if ($cfg -notmatch 'username = "ci-user"' -or $cfg -notmatch 'password = "ci-secret"') { throw 'Upgrade lost the MQTT credentials' }
           if ($cfg -notmatch 'refresh_token_enabled = false') { throw 'Upgrade did not apply the Claude option' }
           if ((Get-Service AIUsageBridge).Status -ne 'Running') { throw 'Service is not running after upgrade' }
           'Upgrade OK'
