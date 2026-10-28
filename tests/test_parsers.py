@@ -191,6 +191,19 @@ def test_claude_refresh_rejected(tmp_path):
     except TokenExpired as exc:
         assert "/login" in str(exc)
     assert json.loads(path.read_text())["claudeAiOauth"]["accessToken"] == "old"
+    # No reintenta el mismo refresh token rechazado...
+    try:
+        p.fetch_raw()
+    except TokenExpired:
+        pass
+    assert len(http.posts) == 1
+    # ...pero sí uno nuevo (después de /login).
+    data = json.loads(path.read_text())
+    data["claudeAiOauth"]["refreshToken"] = "r-new"
+    path.write_text(json.dumps(data))
+    http.token_responses[TOKEN_URLS[0]] = _Resp(200, {"access_token": "fresh", "expires_in": 3600})
+    p.fetch_raw()
+    assert http.gets == ["Bearer fresh"]
 
 
 def test_claude_expired_without_refresh(tmp_path):

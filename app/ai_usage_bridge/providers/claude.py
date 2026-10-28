@@ -66,6 +66,11 @@ class ClaudeProvider(Provider):
         *COMMON_ENTITIES,
     ]
 
+    def __init__(self, cfg: dict, http):
+        super().__init__(cfg, http)
+        # Refresh token que Anthropic ya rechazó: no se reintenta hasta que cambie el archivo.
+        self._rejected_refresh: str | None = None
+
     @property
     def path(self) -> Path:
         return Path(os.path.expandvars(self.cfg.get("credentials_path", "")))
@@ -84,6 +89,8 @@ class ClaudeProvider(Provider):
         refresh_token = oauth.get("refreshToken")
         if not refresh_token:
             raise TokenExpired(f"El token de Claude Code venció y no hay refreshToken. {RELOGIN_HINT}")
+        if refresh_token == self._rejected_refresh:
+            raise TokenExpired(f"Claude rechazó la renovación del token. {RELOGIN_HINT}")
         urls = [self.cfg["token_url"]] if self.cfg.get("token_url") else list(TOKEN_URLS)
         payload = {
             "grant_type": "refresh_token",
@@ -107,6 +114,7 @@ class ClaudeProvider(Provider):
                 raise RateLimited("Claude: renovación de token limitada (HTTP 429)", max(retry, 300.0))
             if resp.status_code in (400, 401, 403):
                 # invalid_grant: el refresh token ya no sirve (vencido o usado por otro proceso).
+                self._rejected_refresh = refresh_token
                 raise TokenExpired(
                     f"Claude rechazó la renovación del token (HTTP {resp.status_code}). {RELOGIN_HINT}"
                 )
