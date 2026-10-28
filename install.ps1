@@ -30,7 +30,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ServiceId = 'AIUsageBridge'
-$Version = '1.0.1'
+$Version = '1.0.2'
 $WinSWUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe'
 $WinSWSha256 = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
 $Src = $PSScriptRoot
