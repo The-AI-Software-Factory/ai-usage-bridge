@@ -1,0 +1,9 @@
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.toml text eol=crlf
+*.iss text eol=crlf
+*.wxs text eol=crlf
+*.rtf text eol=crlf
+*.py text eol=lf
+*.yml text eol=lf
+*.md text eol=lf

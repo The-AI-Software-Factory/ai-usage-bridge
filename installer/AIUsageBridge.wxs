@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AI Usage Bridge - instalador MSI (WiX Toolset 5)
+
+  Lo compila build\build.ps1:
+    wix build installer\AIUsageBridge.wxs -arch x64 -d Version=1.0.0 -d StageDir=<paquete>
+              -ext WixToolset.Util.wixext -ext WixToolset.UI.wixext -o AIUsageBridge.msi
+
+  El MSI copia el paquete a "Program Files\AI Usage Bridge" y ejecuta install.ps1,
+  que instala el servicio en %ProgramData%\AIUsageBridge. Al desinstalar ejecuta
+  uninstall.ps1. Los datos del broker se pueden pasar como propiedades:
+
+    msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=usuario MQTT_PASSWORD=clave
+
+  Si no se pasan, al terminar el asistente se abre "Configurar AI Usage Bridge".
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="AI Usage Bridge"
+           Manufacturer="The AI Software Factory"
+           Version="$(var.Version)"
+           UpgradeCode="13377C86-65E6-4129-A334-2A814CB62148"
+           Scope="perMachine"
+           Compressed="yes">
+    <SummaryInformation Description="AI Usage Bridge - Claude, Codex and Cursor usage for Home Assistant" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of AI Usage Bridge is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Datos del broker (opcionales) -->
+    <Property Id="MQTT_HOST" Secure="yes" />
+    <Property Id="MQTT_PORT" Value="1883" Secure="yes" />
+    <Property Id="MQTT_USER" Secure="yes" />
+    <Property Id="MQTT_PASSWORD" Secure="yes" Hidden="yes" />
+
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/The-AI-Software-Factory/ai-usage-bridge" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/The-AI-Software-Factory/ai-usage-bridge/issues" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="AI Usage Bridge" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="AI Usage Bridge">
+      <Files Directory="INSTALLFOLDER" Include="$(var.StageDir)\**" />
+    </Feature>
+
+    <!--
+      install.ps1 corre como SYSTEM (deferred, sin impersonar). Le pasamos la carpeta
+      AppData del usuario que instala para ubicar sus credenciales.
+      Los valores van con "=" adelante para que PowerShell nunca reciba un argumento
+      vacio (install.ps1 lo quita); el "." final evita que la "\" escape la comilla.
+    -->
+    <SetProperty Id="AUB_Install" Sequence="execute" Before="AUB_Install" Condition="NOT REMOVE"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]install.ps1&quot; -Unattended -NoArpEntry -AppDataDir &quot;[AppDataFolder].&quot; -MqttHost &quot;=[MQTT_HOST]&quot; -MqttPort &quot;=[MQTT_PORT]&quot; -MqttUser &quot;=[MQTT_USER]&quot; -MqttPassword &quot;=[MQTT_PASSWORD]&quot;" />
+    <CustomAction Id="AUB_Install" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
+
+    <SetProperty Id="AUB_Uninstall" Sequence="execute" Before="AUB_Uninstall"
+                 Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]uninstall.ps1&quot; -Unattended" />
+    <CustomAction Id="AUB_Uninstall" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="AUB_Install" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="AUB_Uninstall" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
+    <!-- Interfaz: licencia, progreso y, al final, opcion de configurar MQTT -->
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Configure the MQTT broker now" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]configure.cmd" />
+    <CustomAction Id="AUB_LaunchConfigure" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixShellExec"
+                  Impersonate="yes" Return="ignore" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="AUB_LaunchConfigure"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed AND NOT MQTT_HOST" />
+    </UI>
+  </Package>
+</Wix>

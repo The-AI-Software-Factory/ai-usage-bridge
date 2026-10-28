@@ -1,0 +1,39 @@
+# AI Usage Bridge - configuración
+# Los datos de MQTT se cargan con "Configurar AI Usage Bridge" (menú Inicio) o
+# editando este archivo. Después de editarlo a mano, reiniciá el servicio:
+#   Restart-Service AIUsageBridge   (PowerShell como administrador)
+
+[general]
+log_level = "INFO"
+# Margen mínimo (%) para recomendar un destino; por debajo, "Ninguno".
+min_margin = 5
+
+[mqtt]
+host = ""
+port = 1883
+username = ""
+password = ""
+tls = false
+base_topic = "ai_usage"
+discovery_prefix = "homeassistant"
+
+[claude]
+enabled = true
+credentials_path = '__USERPROFILE__\.claude\.credentials.json'
+interval_seconds = 300
+# Si lo activás, el servicio renueva el token de Claude Code cuando vence y lo
+# reescribe en el archivo de credenciales (para que no se quede sin datos si no
+# abrís Claude Code por varias horas).
+refresh_token_enabled = false
+
+[codex]
+enabled = true
+auth_path = '__USERPROFILE__\.codex\auth.json'
+interval_seconds = 120
+
+[cursor]
+enabled = true
+state_db = '__APPDATA__\Cursor\User\globalStorage\state.vscdb'
+interval_seconds = 300
+# Cursor informa los montos on-demand en centavos.
+amounts_in_cents = true

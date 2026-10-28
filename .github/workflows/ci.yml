@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q tests
+
+  build:
+    name: Build installers
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $v = $env:GITHUB_REF_NAME.TrimStart('v') }
+          else {
+            $base = ([regex]::Match((Get-Content app/ai_usage_bridge/__init__.py -Raw), '__version__ = "([^"]+)"')).Groups[1].Value
+            $v = "$base-dev.$env:GITHUB_RUN_NUMBER"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Build
+        shell: pwsh
+        run: ./build/build.ps1 -Version '${{ steps.version.outputs.version }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-usage-bridge-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.zip
+            dist/*.exe
+            dist/*.msi
+            dist/SHA256SUMS.txt
+
+  smoke-test:
+    name: Install / uninstall (${{ matrix.kind }})
+    needs: build
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [zip, setup, msi]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Install
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          switch ('${{ matrix.kind }}') {
+            'zip' {
+              Expand-Archive dist\ai-usage-bridge.zip -DestinationPath zip
+              powershell -NoProfile -ExecutionPolicy Bypass -File zip\ai-usage-bridge\install.ps1 -Unattended -MqttHost 127.0.0.1
+            }
+            'setup' {
+              $p = Start-Process dist\AIUsageBridge-Setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/MQTTHOST=127.0.0.1', '/LOG=setup.log' -Wait -PassThru
+              Get-Content setup.log -Tail 20
+              if ($p.ExitCode -ne 0) { throw "Setup exit code $($p.ExitCode)" }
+            }
+            'msi' {
+              $p = Start-Process msiexec.exe -ArgumentList '/i', 'dist\AIUsageBridge.msi', '/qn', '/l*v', 'msi.log', 'MQTT_HOST=127.0.0.1' -Wait -PassThru
+              if ($p.ExitCode -ne 0) { Get-Content msi.log -Tail 60; throw "msiexec exit code $($p.ExitCode)" }
+            }
+          }
+          Get-Content "$env:ProgramData\AIUsageBridge\logs\install.log" -ErrorAction SilentlyContinue | Select-Object -Last 40
+      - name: Verify
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-Sleep -Seconds 5
+          $svc = Get-Service AIUsageBridge
+          "Service: $($svc.Status) / $($svc.StartType)"
+          if ($svc.Status -ne 'Running') { Get-ChildItem "$env:ProgramData\AIUsageBridge\logs" | ForEach-Object { Get-Content $_.FullName -Tail 30 }; throw 'Service is not running' }
+          $cfg = Get-Content "$env:ProgramData\AIUsageBridge\config.toml" -Raw
+          if ($cfg -notmatch 'host = "127.0.0.1"') { throw 'MQTT host was not written to config.toml' }
+          if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\AI Usage Bridge\Configurar AI Usage Bridge.lnk")) { throw 'Start menu shortcut missing' }
+          & "$env:ProgramData\AIUsageBridge\python\python.exe" -m ai_usage_bridge --version
+      - name: Uninstall
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ('${{ matrix.kind }}' -eq 'msi') {
+            $p = Start-Process msiexec.exe -ArgumentList '/x', 'dist\AIUsageBridge.msi', '/qn', '/l*v', 'msi-x.log' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { Get-Content msi-x.log -Tail 60; throw "msiexec /x exit code $($p.ExitCode)" }
+          } else {
+            powershell -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\AIUsageBridge\uninstall.ps1" -Unattended
+          }
+          Start-Sleep -Seconds 8
+          if (Get-Service AIUsageBridge -ErrorAction SilentlyContinue) { throw 'Service still installed' }
+          if (Test-Path "$env:ProgramData\AIUsageBridge") { throw 'Install folder still present' }
+          if (Test-Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AIUsageBridge') { throw 'Uninstall entry still present' }
+          'Uninstalled cleanly'
+
+  release:
+    name: GitHub release
+    if: github.ref_type == 'tag'
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "AI Usage Bridge ${GITHUB_REF_NAME#v}" \
+            --generate-notes
