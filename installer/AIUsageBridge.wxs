@@ -35,7 +35,6 @@
 
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/The-AI-Software-Factory/ai-usage-bridge" />
     <Property Id="ARPHELPLINK" Value="https://github.com/The-AI-Software-Factory/ai-usage-bridge/issues" />
-    <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPNOREPAIR" Value="1" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -73,7 +72,7 @@
     <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Configure the MQTT broker now" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
-    <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]configure.cmd" />
+    <SetProperty Id="WixShellExecTarget" Value="[INSTALLFOLDER]configure.cmd" Sequence="ui" After="CostFinalize" />
     <CustomAction Id="AUB_LaunchConfigure" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixShellExec"
                   Impersonate="yes" Return="ignore" />
     <UI>
