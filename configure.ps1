@@ -35,6 +35,8 @@ if (-not ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal
     exit
 }
 
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+
 function ConvertTo-TomlString([string]$Value) { return $Value.Replace('\', '\\').Replace('"', '\"') }
 
 function Get-TomlValue([string]$Text, [string]$Key) {

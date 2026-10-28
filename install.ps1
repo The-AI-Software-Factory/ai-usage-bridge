@@ -69,6 +69,9 @@ $UserProfileDir = [IO.Path]::GetFullPath($UserProfileDir).TrimEnd('\')
 
 function Write-Step([string]$Text) { Write-Host "`n==> $Text" -ForegroundColor Cyan }
 
+# Python escribe en UTF-8; asi PowerShell muestra bien los acentos.
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+
 function Find-Python {
     $candidates = @()
     if (Get-Command py.exe -ErrorAction SilentlyContinue) { $candidates += , @('py.exe', '-3') }
@@ -218,7 +221,8 @@ try {
             if ($null -eq $s) { continue }
             $color = if ($s.status -eq 'ok') { 'Green' } else { 'Yellow' }
             $err = if ($s.status -ne 'ok') { " - $($s.attributes.error)" } else { '' }
-            Write-Host ("  {0,-7} {1,-16} margen: {2}%{3}" -f $k, $s.status, $s.margin, $err) -ForegroundColor $color
+            $margin = if ($null -ne $s.margin) { "$($s.margin)%" } else { '-' }
+            Write-Host ("  {0,-7} {1,-16} margen: {2}{3}" -f $k, $s.status, $margin, $err) -ForegroundColor $color
         }
         Write-Host ("  Mejor destino ahora: {0}" -f $result.summary.best)
     } catch {
