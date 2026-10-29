@@ -4,6 +4,9 @@
 #   Configuración > Paneles de control > Añadir panel de control > Nuevo panel desde cero
 #   Abrilo > lápiz (editar) > ⋮ > Editor de configuración en bruto > pegá este archivo > Guardar
 #
+# Las secciones de ancho completo (column_span: 3) tienen una grilla de 36 columnas:
+# columns: 12 = un tercio, 18 = la mitad, full = todo el ancho.
+#
 # Los entity_id son los que crea Home Assistant con idioma español y los nombres por
 # defecto. Si en tu instalación son otros (por ejemplo, con sufijo _2), reemplazalos.
 
@@ -72,7 +75,7 @@ views:
               yellow: 20
               green: 50
             grid_options:
-              columns: 4
+              columns: 12
           - type: gauge
             entity: sensor.ai_codex_margen
             name: Codex
@@ -84,7 +87,7 @@ views:
               yellow: 20
               green: 50
             grid_options:
-              columns: 4
+              columns: 12
           - type: gauge
             entity: sensor.ai_cursor_margen
             name: Cursor
@@ -96,7 +99,7 @@ views:
               yellow: 20
               green: 50
             grid_options:
-              columns: 4
+              columns: 12
 
       # ------------------------------------------------------------------- Claude
       - type: grid
@@ -225,7 +228,7 @@ views:
             stat_types:
               - max
             grid_options:
-              columns: 6
+              columns: 18
             entities:
               - entity: sensor.ai_claude_uso_5h
                 name: Claude
@@ -239,7 +242,7 @@ views:
             stat_types:
               - max
             grid_options:
-              columns: 6
+              columns: 18
             entities:
               - entity: sensor.ai_claude_uso_semanal
                 name: Claude
