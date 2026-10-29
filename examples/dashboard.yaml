@@ -1,0 +1,249 @@
+# AI Usage Bridge - dashboard de ejemplo para Home Assistant
+#
+# Solo usa tarjetas nativas (no hace falta HACS). Para usarlo:
+#   Configuración > Paneles de control > Añadir panel de control > Nuevo panel desde cero
+#   Abrilo > lápiz (editar) > ⋮ > Editor de configuración en bruto > pegá este archivo > Guardar
+#
+# Los entity_id son los que crea Home Assistant con idioma español y los nombres por
+# defecto. Si en tu instalación son otros (por ejemplo, con sufijo _2), reemplazalos.
+
+title: Uso de IAs
+views:
+  - title: Uso de IAs
+    path: ia
+    icon: mdi:robot-outline
+    type: sections
+    max_columns: 3
+    sections:
+      # ------------------------------------------------------------------ Resumen
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Reparto de trabajo
+            heading_style: title
+            icon: mdi:robot-happy-outline
+          - type: markdown
+            grid_options:
+              columns: full
+            content: |
+              {% set best = states('sensor.ai_resumen_mejor_destino') %}
+              {% set m = states('sensor.ai_resumen_margen_del_mejor') %}
+              {% if best in ['Ninguno', 'unknown', 'unavailable'] %}
+              ## ⏸️ Ninguna IA tiene margen ahora
+              {% else %}
+              ## 👉 Próxima tarea: **{{ best }}** ({{ m | float(0) | round(0) | int }} % libre)
+              {% endif %}
+              {{ states('sensor.ai_resumen_ranking') }}
+          - type: conditional
+            grid_options:
+              columns: full
+            conditions:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity: sensor.ai_claude_estado
+                    state_not: ok
+                  - condition: state
+                    entity: sensor.ai_codex_estado
+                    state_not: ok
+                  - condition: state
+                    entity: sensor.ai_cursor_estado
+                    state_not: ok
+            card:
+              type: markdown
+              content: |
+                ### ⚠️ Hay IAs que no se están leyendo
+
+                {%- for ia in ['claude', 'codex', 'cursor'] %}
+                {%- set e = 'sensor.ai_' ~ ia ~ '_estado' %}
+                {%- if states(e) != 'ok' %}
+                - **{{ ia | capitalize }}**: `{{ states(e) }}` — {{ state_attr(e, 'error') or 'sin detalle' }}
+                {%- endif %}
+                {%- endfor %}
+          - type: gauge
+            entity: sensor.ai_claude_margen
+            name: Claude
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              red: 0
+              yellow: 20
+              green: 50
+            grid_options:
+              columns: 4
+          - type: gauge
+            entity: sensor.ai_codex_margen
+            name: Codex
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              red: 0
+              yellow: 20
+              green: 50
+            grid_options:
+              columns: 4
+          - type: gauge
+            entity: sensor.ai_cursor_margen
+            name: Cursor
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              red: 0
+              yellow: 20
+              green: 50
+            grid_options:
+              columns: 4
+
+      # ------------------------------------------------------------------- Claude
+      - type: grid
+        cards:
+          - type: heading
+            heading: Claude
+            icon: mdi:alpha-c-circle-outline
+            badges:
+              - type: entity
+                entity: sensor.ai_claude_plan
+              - type: entity
+                entity: sensor.ai_claude_estado
+          - type: entities
+            state_color: true
+            entities:
+              - entity: sensor.ai_claude_uso_5h
+                name: Uso 5 horas
+              - entity: sensor.ai_claude_reset_5h
+                name: Se restablece
+              - type: divider
+              - entity: sensor.ai_claude_uso_semanal
+                name: Uso semanal
+              - entity: sensor.ai_claude_reset_semanal
+                name: Se restablece
+              - type: conditional
+                conditions:
+                  - entity: sensor.ai_claude_uso_semanal_sonnet
+                    state_not: unknown
+                row:
+                  entity: sensor.ai_claude_uso_semanal_sonnet
+                  name: Semanal Sonnet
+              - type: conditional
+                conditions:
+                  - entity: sensor.ai_claude_uso_semanal_opus
+                    state_not: unknown
+                row:
+                  entity: sensor.ai_claude_uso_semanal_opus
+                  name: Semanal Opus
+              - type: divider
+              - entity: sensor.ai_claude_ultima_lectura
+                name: Última lectura
+
+      # -------------------------------------------------------------------- Codex
+      - type: grid
+        cards:
+          - type: heading
+            heading: Codex
+            icon: mdi:alpha-o-circle-outline
+            badges:
+              - type: entity
+                entity: sensor.ai_codex_plan
+              - type: entity
+                entity: sensor.ai_codex_estado
+          - type: entities
+            state_color: true
+            entities:
+              - entity: sensor.ai_codex_uso_5h
+                name: Uso 5 horas
+              - entity: sensor.ai_codex_reset_5h
+                name: Se restablece
+              - type: divider
+              - entity: sensor.ai_codex_uso_semanal
+                name: Uso semanal
+              - entity: sensor.ai_codex_reset_semanal
+                name: Se restablece
+              - type: divider
+              - entity: sensor.ai_codex_creditos
+                name: Créditos
+              - entity: sensor.ai_codex_ultima_lectura
+                name: Última lectura
+
+      # ------------------------------------------------------------------- Cursor
+      - type: grid
+        cards:
+          - type: heading
+            heading: Cursor
+            icon: mdi:cursor-default-outline
+            badges:
+              - type: entity
+                entity: sensor.ai_cursor_plan
+              - type: entity
+                entity: sensor.ai_cursor_estado
+          - type: entities
+            state_color: true
+            entities:
+              - entity: sensor.ai_cursor_uso_incluido
+                name: Uso incluido
+              - entity: sensor.ai_cursor_uso_modelos_cursor
+                name: Modelos Cursor
+              - entity: sensor.ai_cursor_uso_otros_modelos
+                name: Otros modelos
+              - type: divider
+              - entity: sensor.ai_cursor_on_demand_usado
+                name: On-demand usado
+              - entity: sensor.ai_cursor_on_demand_limite
+                name: On-demand límite
+              - entity: sensor.ai_cursor_fin_de_ciclo
+                name: Fin del ciclo
+              - entity: sensor.ai_cursor_ultima_lectura
+                name: Última lectura
+
+      # ---------------------------------------------------------------- Históricos
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Evolución
+            icon: mdi:chart-line
+          - type: history-graph
+            title: Margen libre (últimas 24 h)
+            hours_to_show: 24
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.ai_claude_margen
+                name: Claude
+              - entity: sensor.ai_codex_margen
+                name: Codex
+              - entity: sensor.ai_cursor_margen
+                name: Cursor
+          - type: statistics-graph
+            title: Uso de las ventanas de 5 h (últimos 7 días)
+            chart_type: line
+            period: hour
+            days_to_show: 7
+            stat_types:
+              - max
+            grid_options:
+              columns: 6
+            entities:
+              - entity: sensor.ai_claude_uso_5h
+                name: Claude
+              - entity: sensor.ai_codex_uso_5h
+                name: Codex
+          - type: statistics-graph
+            title: Uso semanal (últimos 30 días)
+            chart_type: line
+            period: day
+            days_to_show: 30
+            stat_types:
+              - max
+            grid_options:
+              columns: 6
+            entities:
+              - entity: sensor.ai_claude_uso_semanal
+                name: Claude
+              - entity: sensor.ai_codex_uso_semanal
+                name: Codex
+              - entity: sensor.ai_cursor_uso_incluido
+                name: Cursor (incluido)

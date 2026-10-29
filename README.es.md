@@ -194,6 +194,10 @@ automation:
           message: "Próxima tarea → {{ states('sensor.ai_resumen_ranking') }}"
 ```
 
+### Dashboard de ejemplo
+
+[`examples/dashboard.yaml`](examples/dashboard.yaml) es un panel listo para usar, solo con tarjetas nativas: mejor destino, medidores de margen, detalle por servicio, un aviso cuando alguna IA no se puede leer y gráficos históricos. Creá un panel nuevo, abrí el **Editor de configuración en bruto** y pegalo.
+
 ### Tópicos MQTT
 
 | Tópico | Contenido |

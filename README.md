@@ -197,6 +197,10 @@ automation:
           message: "Next task → {{ states('sensor.ai_resumen_ranking') }}"
 ```
 
+### Dashboard example
+
+[`examples/dashboard.yaml`](examples/dashboard.yaml) is a ready-made dashboard that uses only built-in cards: best target, headroom gauges, details per service, an alert when a service can't be read, and history charts. Create a new dashboard, open the **Raw configuration editor**, and paste it.
+
 ### MQTT topics
 
 | Topic | Content |
