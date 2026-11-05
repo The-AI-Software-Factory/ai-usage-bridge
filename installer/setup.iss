@@ -8,7 +8,7 @@
 ; "Aplicaciones instaladas", desde donde se desinstala con uninstall.ps1).
 ;
 ; Instalacion silenciosa:
-;   AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=usuario /MQTTPASSWORD=clave /CLAUDEREFRESH=1
+;   AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=usuario /MQTTPASSWORD=clave /CLAUDEREFRESH=1 /DASHBOARDURL=http://192.168.1.10:8123/
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -61,6 +61,7 @@ es.MqttHost=Host o IP (por ejemplo 192.168.1.10):
 es.MqttPort=Puerto:
 es.MqttUser=Usuario:
 es.MqttPassword=Contraseña:
+es.DashboardUrl=URL que abren los íconos de la bandeja (opcional, por ejemplo http://192.168.1.10:8123/):
 es.MqttHostRequired=Ingresá el host o la IP del broker MQTT.
 es.MqttPortInvalid=El puerto tiene que ser un número entre 1 y 65535.
 es.MqttUpgrade=Se muestra la configuración actual; podés modificarla. Dejá la contraseña vacía para conservar la guardada.
@@ -77,6 +78,7 @@ en.MqttHost=Host or IP (for example 192.168.1.10):
 en.MqttPort=Port:
 en.MqttUser=Username:
 en.MqttPassword=Password:
+en.DashboardUrl=URL opened by the tray icons (optional, for example http://192.168.1.10:8123/):
 en.MqttHostRequired=Enter the host or IP of the MQTT broker.
 en.MqttPortInvalid=The port must be a number between 1 and 65535.
 en.MqttUpgrade=Your current settings are shown; you can change them. Leave the password empty to keep the saved one.
@@ -180,11 +182,13 @@ begin
   MqttPage.Add(CustomMessage('MqttPort'), False);
   MqttPage.Add(CustomMessage('MqttUser'), False);
   MqttPage.Add(CustomMessage('MqttPassword'), True);
+  MqttPage.Add(CustomMessage('DashboardUrl'), False);
   { En una actualizacion se precargan los valores actuales (la contrasena no se muestra). }
   MqttPage.Values[0] := ParamOrConfig('MQTTHOST', 'host', '');
   MqttPage.Values[1] := ParamOrConfig('MQTTPORT', 'port', '1883');
   MqttPage.Values[2] := ParamOrConfig('MQTTUSER', 'username', '');
   MqttPage.Values[3] := ExpandConstant('{param:MQTTPASSWORD|}');
+  MqttPage.Values[4] := ParamOrConfig('DASHBOARDURL', 'dashboard_url', '');
 
   ClaudePage := CreateInputOptionPage(MqttPage.ID,
     CustomMessage('ClaudeTitle'), CustomMessage('ClaudeSubtitle'), CustomMessage('ClaudeHelp'), False, False);
@@ -243,6 +247,8 @@ begin
     ' -UserProfileDir "' + ExpandConstant('{%USERPROFILE}') + '"' +
     ' -AppDataDir "' + ExpandConstant('{userappdata}') + '"' +
     ' -InstallDir "' + ExpandConstant('{app}') + '"';
+  if Clean(MqttPage.Values[4]) <> '' then
+    Params := Params + ' -DashboardUrl "' + Clean(MqttPage.Values[4]) + '"';
   if ClaudePage.Values[0] then
     Params := Params + ' -ClaudeRefresh true'
   else

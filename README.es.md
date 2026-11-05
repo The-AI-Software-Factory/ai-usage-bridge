@@ -26,6 +26,7 @@ Si trabajás con varios agentes de IA, cada uno tiene sus propios límites: una 
 - [Requisitos](#requisitos)
 - [Instalación](#instalación)
 - [Qué ves en Home Assistant](#qué-ves-en-home-assistant)
+- [Íconos en la bandeja](#íconos-en-la-bandeja)
 - [Configuración](#configuración)
 - [Actualizar](#actualizar)
 - [Desinstalar](#desinstalar)
@@ -130,13 +131,13 @@ Elijas el que elijas, el instalador:
 
 ```powershell
 # Setup.exe
-.\AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=homeassistant /MQTTPASSWORD=tu-contraseña /CLAUDEREFRESH=1
+.\AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=homeassistant /MQTTPASSWORD=tu-contraseña /CLAUDEREFRESH=1 /DASHBOARDURL=http://192.168.1.10:8123/
 
 # MSI
-msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=homeassistant MQTT_PASSWORD=tu-contraseña CLAUDE_REFRESH=1
+msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=homeassistant MQTT_PASSWORD=tu-contraseña CLAUDE_REFRESH=1 DASHBOARD_URL=http://192.168.1.10:8123/
 
 # Zip (desde un PowerShell como administrador, dentro de la carpeta descomprimida)
-.\install.ps1 -Unattended -MqttHost 192.168.1.10 -MqttPort 1883 -MqttUser homeassistant -MqttPassword 'tu-contraseña' -ClaudeRefresh true
+.\install.ps1 -Unattended -MqttHost 192.168.1.10 -MqttPort 1883 -MqttUser homeassistant -MqttPassword 'tu-contraseña' -ClaudeRefresh true -DashboardUrl http://192.168.1.10:8123/
 ```
 
 Lo que pasás por línea de comandos puede quedar visible para otros procesos mientras corre el instalador; en equipos compartidos, preferí el modo interactivo. Si no pasás el broker, el servicio se instala y espera hasta que ejecutes **Configurar AI Usage Bridge**.
@@ -211,6 +212,23 @@ automation:
 
 Todos los mensajes son retenidos. El tópico base y el prefijo de discovery se pueden configurar.
 
+## Íconos en la bandeja
+
+Además de Home Assistant, el servicio muestra **un ícono por IA en el área de notificación de Windows**, junto al reloj, con el margen libre siempre a la vista:
+
+- **Número:** % libre en la ventana más ajustada (el mismo **Margen** de Home Assistant).
+- **Color:** verde desde 50 %, amarillo desde 20 %, rojo por debajo. Gris con `?` o `!` cuando no hay datos o el servicio no puede leer esa IA.
+- **Franja inferior:** identifica a la IA: naranja para Claude, azul para Codex, gris para Cursor.
+- **Al pasar el mouse:** uso y próximos resets, por ejemplo `Claude: 93 % libre ★ · 5 h: 3 % · reset 19:40 · Semana: 7 % · reset sáb 03:00`. La ★ marca el mejor destino.
+- **Clic:** abre la URL que configures (por ejemplo, tu dashboard de Home Assistant). **Clic derecho:** actualizar, configurar, logs, salir.
+
+Los íconos arrancan al iniciar sesión en Windows, para todos los usuarios de la PC, y funcionan aunque no uses MQTT ni Home Assistant. Solo leen `status.json`, un archivo que escribe el servicio con los números de uso y nada más (sin tokens ni contraseñas).
+
+> [!TIP]
+> Windows 11 esconde los íconos nuevos en el menú de desborde (`^`). Arrastrá los tres a la barra de tareas, o activalos en **Configuración → Personalización → Barra de tareas → Otros íconos de la bandeja del sistema** (aparecen como *AIUsageTray*).
+
+Con el MSI, los íconos aparecen en el próximo inicio de sesión, o en el momento desde **menú Inicio → AI Usage Bridge → AI Usage Bridge (bandeja)**.
+
 ## Configuración
 
 El instalador crea `C:\ProgramData\AIUsageBridge\config.toml`. Solo los administradores y el servicio pueden leerlo, porque tiene la contraseña de MQTT. Editalo con un editor abierto como administrador y después reiniciá el servicio:
@@ -235,6 +253,9 @@ Restart-Service AIUsageBridge
 | `codex.auth_path` | `%USERPROFILE%\.codex\auth.json` | Credenciales de Codex |
 | `cursor.state_db` | `%APPDATA%\Cursor\User\globalStorage\state.vscdb` | Base de estado local de Cursor |
 | `cursor.amounts_in_cents` | `true` | Cursor informa los montos on‑demand en centavos |
+| `tray.enabled` | `true` | Muestra los íconos en la bandeja |
+| `tray.show` | `["claude", "codex", "cursor"]` | Qué IAs tienen ícono y en qué orden |
+| `tray.dashboard_url` | — | URL que se abre al hacer clic en un ícono (se carga con **Configurar AI Usage Bridge**) |
 
 ### Mantener actualizados los datos de Claude
 

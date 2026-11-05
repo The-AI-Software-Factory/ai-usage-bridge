@@ -108,6 +108,24 @@ jobs:
           if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\AI Usage Bridge\Configurar AI Usage Bridge.lnk")) { throw 'Start menu shortcut missing' }
           if ('${{ matrix.kind }}' -ne 'zip' -and $cfg -notmatch 'refresh_token_enabled = true') { throw 'Claude token renewal should be on by default' }
           & "$env:ProgramData\AIUsageBridge\python\python.exe" -m ai_usage_bridge --version
+      - name: Tray app
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = "$env:ProgramData\AIUsageBridge"
+          $run = (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run').AIUsageBridgeTray
+          if ($run -notlike '*AIUsageTray.exe*ai_usage_tray.pyw*') { throw "Tray autostart missing: $run" }
+          for ($i = 0; $i -lt 30 -and -not (Test-Path "$dir\status.json"); $i++) { Start-Sleep -Seconds 1 }
+          $status = Get-Content "$dir\status.json" -Raw | ConvertFrom-Json
+          if (-not $status.providers.claude) { throw 'status.json without providers' }
+          if ((Get-Content "$dir\status.json" -Raw) -match 'Bearer|accessToken|password') { throw 'status.json leaks secrets' }
+          Start-Process "$dir\python\AIUsageTray.exe" -ArgumentList "`"$dir\app\ai_usage_tray.pyw`""
+          Start-Sleep -Seconds 8
+          $procs = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*ai_usage_tray.pyw*' })
+          if ($procs.Count -lt 1) { throw 'Tray app is not running' }
+          $icons = Get-ChildItem "$env:LOCALAPPDATA\AIUsageBridge\icons" -Filter *.ico -ErrorAction SilentlyContinue
+          if (@($icons).Count -lt 3) { throw 'Tray icons were not rendered' }
+          "Tray OK: $($procs.Count) process(es), $(@($icons).Count) icons"
       - name: Upgrade keeps the broker settings
         if: matrix.kind == 'setup'
         shell: powershell
@@ -136,6 +154,8 @@ jobs:
           if (Get-Service AIUsageBridge -ErrorAction SilentlyContinue) { throw 'Service still installed' }
           if (Test-Path "$env:ProgramData\AIUsageBridge") { throw 'Install folder still present' }
           if (Test-Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AIUsageBridge') { throw 'Uninstall entry still present' }
+          if ((Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run').AIUsageBridgeTray) { throw 'Tray autostart still present' }
+          if (@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*ai_usage_tray.pyw*' }).Count) { throw 'Tray app still running' }
           'Uninstalled cleanly'
 
   release:

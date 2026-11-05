@@ -41,6 +41,13 @@ try {
         if (Test-Path $wrapper) { & $wrapper uninstall | Out-Null } else { sc.exe delete $ServiceId | Out-Null }
     }
 
+    # 1b. App de bandeja: inicio automatico y procesos abiertos
+    $runKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+    Remove-ItemProperty -Path $runKey -Name 'AIUsageBridgeTray' -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -like '*ai_usage_tray.pyw*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
     # 2. Entidades de Home Assistant (antes de borrar la config)
     $config = Join-Path $InstallDir 'config.toml'
     $xmlPath = Join-Path $InstallDir "$ServiceId.xml"

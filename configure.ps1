@@ -17,6 +17,8 @@ param(
     [string]$MqttPasswordFile,
     # "true"/"false": renovar automaticamente el token de Claude Code.
     [string]$ClaudeRefresh,
+    # URL que abre la app de bandeja al hacer clic ("-" para borrarla).
+    [string]$DashboardUrl,
     [string]$PythonExe,
     [switch]$NoRestart,
     [switch]$NoPause,
@@ -47,6 +49,18 @@ function Get-TomlValue([string]$Text, [string]$Key) {
     $m = [regex]::Match($Text, "(?m)^\s*$Key\s*=\s*(\d+|true|false)")
     if ($m.Success) { return $m.Groups[1].Value }
     return ''
+}
+
+# Agrega la seccion [tray] a configuraciones de versiones anteriores.
+function Add-TraySection([string]$Text) {
+    if ([regex]::IsMatch($Text, '(?m)^\s*dashboard_url\s*=')) { return $Text }
+    $block = "[tray]`r`nenabled = true`r`nshow = [""claude"", ""codex"", ""cursor""]`r`ndashboard_url = """""
+    $header = [regex]'(?m)^[ \t]*\[tray\][ \t]*\r?$'
+    if ($header.IsMatch($Text)) {
+        # La seccion existe sin dashboard_url: solo se agrega esa clave.
+        return $header.Replace($Text, "[tray]`r`ndashboard_url = """"", 1)
+    }
+    return $Text.TrimEnd() + "`r`n`r`n" + $block + "`r`n"
 }
 
 function Set-TomlLine([string]$Text, [string]$Key, [string]$Literal) {
@@ -125,6 +139,23 @@ try {
         $ans = Read-Host "Renovar automaticamente el token de Claude? (s/n) [$def]"
         $newRefresh = if ([string]::IsNullOrWhiteSpace($ans)) { $curRefresh } else { $ans.Trim() -match '^(s|si|y|yes|1|true)$' }
     }
+
+    # URL del dashboard para la app de bandeja
+    $text = Add-TraySection $text
+    $curUrl = Get-TomlValue $text 'dashboard_url'
+    if ($PSBoundParameters.ContainsKey('DashboardUrl')) {
+        $newUrl = $DashboardUrl.Trim().TrimStart('=')
+    } elseif ($Unattended) {
+        $newUrl = $curUrl
+    } else {
+        $suggest = if ($curUrl) { $curUrl } elseif ($newHost) { "http://$($newHost):8123/" } else { '' }
+        Write-Host ''
+        Write-Host 'Bandeja: al hacer clic en un icono se abre esta URL (por ejemplo, tu dashboard de Home Assistant).'
+        $newUrl = Read-Value 'URL del dashboard (vacio = sugerida; "-" = ninguna)' $suggest
+    }
+    if ($newUrl -eq '-') { $newUrl = '' }
+    if ($newUrl -and $newUrl -notmatch '^https?://') { throw "La URL del dashboard tiene que empezar con http:// o https://" }
+    $text = Set-TomlLine $text 'dashboard_url' ('"' + (ConvertTo-TomlString $newUrl) + '"')
 
     $text = Set-TomlLine $text 'refresh_token_enabled' $(if ($newRefresh) { 'true' } else { 'false' })
     $text = Set-TomlLine $text 'host' ('"' + (ConvertTo-TomlString $newHost) + '"')

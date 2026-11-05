@@ -91,6 +91,8 @@ Expand-Archive $pyZip "$stage\python"
 $pth = Get-ChildItem "$stage\python" -Filter 'python3*._pth' | Select-Object -First 1
 # Con ._pth, Python ignora PYTHONPATH: declaramos aca las carpetas de la app.
 Set-Content $pth.FullName -Value @("$($pth.BaseName).zip", '.', '..\app', '..\lib') -Encoding ascii
+# Ejecutable propio para la bandeja (Windows lo muestra como "AIUsageTray" en la configuracion de la barra).
+Copy-Item "$stage\python\pythonw.exe" "$stage\python\AIUsageTray.exe"
 
 # --- 4. Dependencias --------------------------------------------------------
 Write-Step 'Dependencias'
@@ -111,7 +113,7 @@ Copy-Item $winsw "$stage\winsw\WinSW-x64.exe"
 
 # --- 6. Prueba con el Python embebido ---------------------------------------
 Write-Step 'Prueba del paquete con el Python embebido'
-$out = & "$stage\python\python.exe" -c "import ai_usage_bridge, ai_usage_bridge.main, ai_usage_bridge.winsecret, paho.mqtt.client, requests, sqlite3, tomllib, cryptography.hazmat.primitives.ciphers.aead; print(ai_usage_bridge.__version__)"
+$out = & "$stage\python\python.exe" -c "import ai_usage_bridge, ai_usage_bridge.main, ai_usage_bridge.winsecret, ai_usage_bridge.tray, ai_usage_bridge.tray_render, PIL.Image, paho.mqtt.client, requests, sqlite3, tomllib, cryptography.hazmat.primitives.ciphers.aead; print(ai_usage_bridge.__version__)"
 Assert-Exit 'Prueba del Python embebido'
 if ("$out".Trim() -ne $Version) { throw "La version empaquetada ($out) no coincide con $Version" }
 Write-Host "OK ($out)"

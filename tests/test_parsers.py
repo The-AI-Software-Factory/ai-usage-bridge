@@ -336,3 +336,59 @@ def test_cursor_encrypted_token_real_dpapi(tmp_path):
     db = _cursor_install(tmp_path, _seal(key, _jwt({"sub": "auth0|user_win"})), wrapped_key=b"DPAPI" + wrapped)
     token, user_id = CursorProvider({"state_db": str(db)}, S)._read_token()  # DPAPI real, sin simular
     assert user_id == "user_win"
+
+
+# --- Bandeja y status.json ------------------------------------------------------
+
+def test_status_file_has_no_secrets(tmp_path):
+    from ai_usage_bridge import statusfile, summary as sm
+    states = {
+        "claude": {"status": "ok", "margin": 93.0, "h5_used": 3.0, "h5_reset": FUTURE, "plan": "max 5x",
+                   "attributes": {"error": "Bearer sk-secret"}},
+        "cursor": {"status": "sin_sesion", "margin": None, "attributes": {"error": "token xyz"}},
+    }
+    data = statusfile.build_status(states, sm.build_summary(states), {"dashboard_url": "http://ha:8123/ia"})
+    path = tmp_path / "status.json"
+    statusfile.write_status(path, data)
+    text = path.read_text(encoding="utf-8")
+    assert "secret" not in text and "xyz" not in text and "attributes" not in text
+    loaded = json.loads(text)
+    assert loaded["providers"]["claude"]["margin"] == 93.0
+    assert loaded["providers"]["cursor"]["status_text"].startswith("esperando")
+    assert loaded["tray"]["show"] == ["claude", "cursor"] and loaded["best"] == "Claude"
+
+
+def test_tray_icons_and_tooltips():
+    import datetime as dt
+    from ai_usage_bridge import tray_render as tr
+    assert tr.icon_text({"margin": 99.6}) == "100" and tr.icon_text({"margin": 41.1}) == "41"
+    assert tr.icon_text(None) == "?" and tr.icon_text({"margin": None, "status": "token_vencido"}) == "!"
+    assert tr.level_color(50) == tr.GREEN and tr.level_color(20) == tr.AMBER and tr.level_color(19.9) == tr.RED
+    for size in (16, 20, 24, 32):
+        img = tr.render_icon("claude", {"margin": 100}, size)
+        assert img.size == (size, size) and img.getpixel((size // 2, size - 1))[3] > 0
+    now = dt.datetime.now(dt.timezone.utc)
+    item = {"label": "Claude", "status": "ok", "margin": 93.0, "h5_used": 3.0,
+            "h5_reset": (now + dt.timedelta(hours=2)).isoformat(), "week_used": 7.0,
+            "week_reset": (now + dt.timedelta(days=2)).isoformat()}
+    tip = tr.tooltip("claude", item, "Claude", stale=False, now=now)
+    assert tip.startswith("Claude: 93 % libre ★") and "5 h: 3 %" in tip and "Semana: 7 %" in tip
+    assert len(tip) <= tr.TIP_MAX
+    cur = {"label": "Cursor", "status": "ok", "margin": 41.1, "included_used": 58.9,
+           "cycle_reset": (now + dt.timedelta(days=14)).isoformat(), "ondemand_used": 0.0, "ondemand_limit": 20.0}
+    tip = tr.tooltip("cursor", cur, "Codex", stale=False, now=now)
+    assert "Incluido: 59 %" in tip and "0.00 / 20 USD" in tip and "★" not in tip
+    assert "sin datos" in tr.tooltip("codex", item, None, stale=True)
+    assert tr.is_stale({"updated": now.isoformat()}, now) is False
+    assert tr.is_stale({"updated": (now - dt.timedelta(hours=1)).isoformat()}, now) is True
+    assert tr.is_stale({"updated": now.isoformat(), "stopped": True}, now) is True
+
+
+def test_runner_writes_status(tmp_path):
+    cfg = {"mqtt": {"host": ""}, "claude": {"credentials_path": str(tmp_path / "x")},
+           "codex": {"enabled": False}, "cursor": {"enabled": False}, "tray": {"dashboard_url": "http://ha"}}
+    r = Runner(cfg, publish=False, status_path=tmp_path / "status.json")
+    r.poll(r.providers[0])
+    r.write_status()
+    data = json.loads((tmp_path / "status.json").read_text(encoding="utf-8"))
+    assert data["providers"]["claude"]["status"] == "sin_credenciales" and data["stopped"] is False

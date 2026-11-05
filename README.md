@@ -26,6 +26,7 @@ If you work with several AI coding agents, each one has its own limits: a 5‑ho
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [What you get in Home Assistant](#what-you-get-in-home-assistant)
+- [Tray icons](#tray-icons)
 - [Configuration](#configuration)
 - [Updating](#updating)
 - [Uninstalling](#uninstalling)
@@ -133,13 +134,13 @@ Whichever you choose, the installer:
 
 ```powershell
 # Setup.exe
-.\AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=homeassistant /MQTTPASSWORD=your-password /CLAUDEREFRESH=1
+.\AIUsageBridge-Setup.exe /VERYSILENT /MQTTHOST=192.168.1.10 /MQTTPORT=1883 /MQTTUSER=homeassistant /MQTTPASSWORD=your-password /CLAUDEREFRESH=1 /DASHBOARDURL=http://192.168.1.10:8123/
 
 # MSI
-msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=homeassistant MQTT_PASSWORD=your-password CLAUDE_REFRESH=1
+msiexec /i AIUsageBridge.msi /qn MQTT_HOST=192.168.1.10 MQTT_PORT=1883 MQTT_USER=homeassistant MQTT_PASSWORD=your-password CLAUDE_REFRESH=1 DASHBOARD_URL=http://192.168.1.10:8123/
 
 # Zip (from an elevated PowerShell, inside the extracted folder)
-.\install.ps1 -Unattended -MqttHost 192.168.1.10 -MqttPort 1883 -MqttUser homeassistant -MqttPassword 'your-password' -ClaudeRefresh true
+.\install.ps1 -Unattended -MqttHost 192.168.1.10 -MqttPort 1883 -MqttUser homeassistant -MqttPassword 'your-password' -ClaudeRefresh true -DashboardUrl http://192.168.1.10:8123/
 ```
 
 Values passed on the command line can be visible to other processes while the installer runs, so prefer the interactive mode on shared machines. If you omit the broker, the service installs and waits until you run **Configurar AI Usage Bridge**.
@@ -214,6 +215,23 @@ automation:
 
 All messages are retained. The base topic and discovery prefix are configurable.
 
+## Tray icons
+
+Besides Home Assistant, the service shows **one icon per AI in the Windows notification area**, next to the clock, with the free headroom always visible:
+
+- **Number:** % free in the tightest window (the same **Margen** as in Home Assistant).
+- **Color:** green from 50 %, amber from 20 %, red below. Gray with `?` or `!` when there's no data or the service can't read that AI.
+- **Bottom strip:** identifies the AI: orange for Claude, blue for Codex, gray for Cursor.
+- **Tooltip:** usage and next resets, for example `Claude: 93 % libre ★ · 5 h: 3 % · reset 19:40 · Semana: 7 % · reset sáb 03:00`. The ★ marks the best target.
+- **Click:** opens the URL you set (for example, your Home Assistant dashboard). **Right‑click:** refresh, configure, logs, exit.
+
+The icons start when you sign in to Windows, for every user of the PC, and work even without MQTT or Home Assistant. They only read `status.json`, a file the service writes with the usage numbers and nothing else (no tokens or passwords).
+
+> [!TIP]
+> Windows 11 hides new tray icons in the overflow menu (`^`). Drag the three icons onto the taskbar, or turn them on in **Settings → Personalization → Taskbar → Other system tray icons** (they're listed as *AIUsageTray*).
+
+With the MSI, the icons appear the next time you sign in, or right away from **Start menu → AI Usage Bridge → AI Usage Bridge (bandeja)**.
+
 ## Configuration
 
 The installer writes `C:\ProgramData\AIUsageBridge\config.toml`. Only administrators and the service can read it, because it holds the MQTT password. Edit it from an elevated editor, then restart the service:
@@ -238,6 +256,9 @@ Restart-Service AIUsageBridge
 | `codex.auth_path` | `%USERPROFILE%\.codex\auth.json` | Codex credentials |
 | `cursor.state_db` | `%APPDATA%\Cursor\User\globalStorage\state.vscdb` | Cursor local state database |
 | `cursor.amounts_in_cents` | `true` | Cursor reports on‑demand amounts in cents |
+| `tray.enabled` | `true` | Show the tray icons |
+| `tray.show` | `["claude", "codex", "cursor"]` | Which AIs get an icon, and in which order |
+| `tray.dashboard_url` | — | URL opened when you click an icon (set it with **Configurar AI Usage Bridge**) |
 
 ### Keeping Claude data fresh
 

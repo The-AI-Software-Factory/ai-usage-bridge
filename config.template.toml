@@ -38,3 +38,11 @@ state_db = '__APPDATA__\Cursor\User\globalStorage\state.vscdb'
 interval_seconds = 300
 # Cursor informa los montos on-demand en centavos.
 amounts_in_cents = true
+
+[tray]
+# Íconos en la bandeja de Windows (uno por IA, con el % libre).
+enabled = true
+# Cuáles mostrar y en qué orden.
+show = ["claude", "codex", "cursor"]
+# Se abre al hacer clic en un ícono (por ejemplo, tu dashboard de Home Assistant).
+dashboard_url = ""

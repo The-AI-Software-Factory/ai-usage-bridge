@@ -24,13 +24,17 @@ param(
     # "true"/"false": renovar automaticamente el token de Claude Code.
     [string]$ClaudeRefresh,
     # El MSI registra su propia entrada en "Aplicaciones instaladas".
+    # URL que abre la app de bandeja al hacer clic (por ejemplo, el dashboard de Home Assistant).
+    [string]$DashboardUrl,
     [switch]$NoArpEntry,
+    # No iniciar la app de bandeja al terminar (el MSI corre como SYSTEM y no puede).
+    [switch]$NoTrayStart,
     [switch]$Unattended
 )
 
 $ErrorActionPreference = 'Stop'
 $ServiceId = 'AIUsageBridge'
-$Version = '1.0.3'
+$Version = '1.0.4'
 $WinSWUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe'
 $WinSWSha256 = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
 $Src = $PSScriptRoot
@@ -56,7 +60,7 @@ if (-not (Test-Admin)) {
 }
 
 # El MSI antepone "=" a cada valor para no pasar nunca argumentos vacios.
-foreach ($name in @('MqttHost', 'MqttPort', 'MqttUser', 'MqttPassword', 'ClaudeRefresh')) {
+foreach ($name in @('MqttHost', 'MqttPort', 'MqttUser', 'MqttPassword', 'ClaudeRefresh', 'DashboardUrl')) {
     $value = Get-Variable -Name $name -ValueOnly
     if ($value -and $value.StartsWith('=')) { Set-Variable -Name $name -Value $value.Substring(1) }
 }
@@ -107,6 +111,13 @@ function Remove-ExistingService {
     for ($i = 0; $i -lt 20 -and (Get-Service -Name $ServiceId -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
 }
 
+function Stop-Tray {
+    # Cierra la app de bandeja de todos los usuarios (para poder reemplazar o borrar archivos).
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -like '*ai_usage_tray.pyw*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
 function New-Shortcut([string]$Path, [string]$Target, [string]$Arguments, [string]$Description) {
     $shell = New-Object -ComObject WScript.Shell
     $lnk = $shell.CreateShortcut($Path)
@@ -126,6 +137,7 @@ try {
     Write-Host "Destino:           $InstallDir"
 
     Remove-ExistingService
+    Stop-Tray
 
     # 1. Archivos de la app --------------------------------------------------
     Write-Step 'Copiando archivos'
@@ -147,6 +159,7 @@ try {
         Copy-Item (Join-Path $Src 'python') (Join-Path $InstallDir 'python') -Recurse
         Copy-Item (Join-Path $Src 'lib') (Join-Path $InstallDir 'lib') -Recurse
         $python = Join-Path $InstallDir 'python\python.exe'
+        $trayExe = Join-Path $InstallDir 'python\AIUsageTray.exe'
     } else {
         Write-Step 'Buscando Python 3.11 o superior'
         $python = Find-Python
@@ -160,6 +173,7 @@ try {
             if (-not $python) { throw 'No se pudo encontrar Python despues de instalarlo.' }
         }
         Write-Host "Python: $python"
+        $trayExe = Join-Path (Split-Path $python -Parent) 'pythonw.exe'
         Write-Step 'Instalando dependencias'
         & $python -m pip install --disable-pip-version-check --no-warn-script-location -q `
             --target (Join-Path $InstallDir 'lib') -r (Join-Path $InstallDir 'requirements.txt')
@@ -194,12 +208,12 @@ try {
     icacls $config /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
 
     $mqttArgs = @{ InstallDir = $InstallDir; PythonExe = $python; NoRestart = $true; Unattended = $true }
-    foreach ($k in @('MqttHost', 'MqttPort', 'MqttUser', 'MqttPassword', 'MqttPasswordFile', 'ClaudeRefresh')) {
+    foreach ($k in @('MqttHost', 'MqttPort', 'MqttUser', 'MqttPassword', 'MqttPasswordFile', 'ClaudeRefresh', 'DashboardUrl')) {
         $value = Get-Variable -Name $k -ValueOnly
         if ("$value" -ne '') { $mqttArgs[$k] = $value }
     }
     $hasHost = [regex]::IsMatch([IO.File]::ReadAllText($config), '(?m)^\s*host\s*=\s*"[^"]+"')
-    if ($mqttArgs.ContainsKey('MqttHost') -or $mqttArgs.ContainsKey('MqttPasswordFile') -or $mqttArgs.ContainsKey('ClaudeRefresh')) {
+    if ($mqttArgs.ContainsKey('MqttHost') -or $mqttArgs.ContainsKey('MqttPasswordFile') -or $mqttArgs.ContainsKey('ClaudeRefresh') -or $mqttArgs.ContainsKey('DashboardUrl')) {
         Write-Step 'Guardando los datos del broker MQTT'
         & (Join-Path $InstallDir 'configure.ps1') @mqttArgs
     } elseif (-not $hasHost -and -not $Unattended) {
@@ -273,6 +287,20 @@ try {
     New-Item -ItemType Directory -Force -Path $menu | Out-Null
     New-Shortcut (Join-Path $menu 'Configurar AI Usage Bridge.lnk') (Join-Path $InstallDir 'configure.cmd') '' 'Datos del broker MQTT'
     New-Shortcut (Join-Path $menu 'Logs de AI Usage Bridge.lnk') $logs '' 'Carpeta de logs del servicio'
+
+    # 7b. App de bandeja (un icono por IA): arranca al iniciar sesion, para todos los usuarios
+    $trayScript = Join-Path $InstallDir 'app\ai_usage_tray.pyw'
+    if ($trayExe -and (Test-Path $trayExe)) {
+        Write-Step 'App de bandeja'
+        $trayLnk = Join-Path $menu 'AI Usage Bridge (bandeja).lnk'
+        New-Shortcut $trayLnk $trayExe "`"$trayScript`"" 'Iconos con el % libre de cada IA'
+        $runKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+        Set-ItemProperty -Path $runKey -Name 'AIUsageBridgeTray' -Value "`"$trayExe`" `"$trayScript`""
+        if (-not $NoTrayStart) {
+            # Se abre a traves de Explorer para que corra con tu usuario, sin permisos de administrador.
+            try { Start-Process -FilePath 'explorer.exe' -ArgumentList "`"$trayLnk`"" } catch { }
+        }
+    }
 
     # 8. Entrada en "Aplicaciones instaladas" -------------------------------
     if (-not $NoArpEntry) {

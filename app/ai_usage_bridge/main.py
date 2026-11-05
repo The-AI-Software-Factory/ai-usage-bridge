@@ -15,7 +15,7 @@ from pathlib import Path
 
 import requests
 
-from . import __version__, summary
+from . import __version__, statusfile, summary
 from .providers import build_providers
 from .providers.base import Provider, ProviderError, RateLimited
 from .publisher import Publisher
@@ -40,8 +40,10 @@ def setup_logging(cfg: dict, stream=sys.stdout) -> None:
 
 
 class Runner:
-    def __init__(self, cfg: dict, publish: bool = True, announce: bool = True):
+    def __init__(self, cfg: dict, publish: bool = True, announce: bool = True,
+                 status_path: Path | None = None):
         self.cfg = cfg
+        self.status_path = status_path
         self.http = requests.Session()
         self.providers = build_providers(cfg, self.http)
         self.states: dict[str, dict] = {}
@@ -104,19 +106,32 @@ class Runner:
         self.next_run[p.key] = time.monotonic() + delay
         return state
 
+    def write_status(self, stopped: bool = False) -> None:
+        """Actualiza status.json para la app de bandeja (sin secretos)."""
+        if not self.status_path:
+            return
+        data = statusfile.build_status(
+            self.states, summary.build_summary(self.states, self.min_margin), self.cfg.get("tray", {})
+        )
+        data["stopped"] = stopped
+        try:
+            statusfile.write_status(self.status_path, data)
+        except OSError as exc:
+            log.warning("No pude escribir %s: %s", self.status_path, exc)
+
     def poll_all(self) -> dict:
         for p in self.providers:
             self.poll(p)
         return {**self.states, summary.KEY: summary.build_summary(self.states, self.min_margin)}
 
     def run(self) -> None:
-        assert self.publisher is not None
-        if not str(self.cfg.get("mqtt", {}).get("host", "")).strip():
-            # Recién instalado sin datos de MQTT: esperamos sin reiniciar en bucle.
-            log.error("MQTT sin configurar: usá 'Configurar AI Usage Bridge' en el menú Inicio")
-            self.stop_event.wait()
-            return
-        self.publisher.start()
+        mqtt_on = self.publisher is not None and bool(str(self.cfg.get("mqtt", {}).get("host", "")).strip())
+        if mqtt_on:
+            self.publisher.start()
+        else:
+            # Sin MQTT se sigue leyendo para la app de bandeja.
+            log.warning("MQTT sin configurar: solo se actualiza la bandeja. "
+                        "Usá 'Configurar AI Usage Bridge' en el menú Inicio para publicar en Home Assistant")
         log.info("AI Usage Bridge %s iniciado (%s)", __version__, ", ".join(p.key for p in self.providers))
         while not self.stop_event.is_set():
             now = time.monotonic()
@@ -126,15 +141,21 @@ class Runner:
                     log.info("%s: cambiaron las credenciales, se vuelve a leer", p.key)
                     self.next_run[p.key] = now
                 if now >= self.next_run[p.key]:
-                    self.publisher.publish_state(p.key, self.poll(p))
+                    state = self.poll(p)
+                    if mqtt_on:
+                        self.publisher.publish_state(p.key, state)
                     changed = True
             if changed:
-                self.publisher.publish_state(
-                    summary.KEY, summary.build_summary(self.states, self.min_margin)
-                )
+                if mqtt_on:
+                    self.publisher.publish_state(
+                        summary.KEY, summary.build_summary(self.states, self.min_margin)
+                    )
+                self.write_status()
             self.stop_event.wait(1.0)
         log.info("Deteniendo")
-        self.publisher.stop()
+        self.write_status(stopped=True)
+        if mqtt_on:
+            self.publisher.stop()
 
 
 def _install_signal_handlers(runner: Runner) -> None:
@@ -225,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
             runner.publisher.client.loop_stop()
         return 0
 
+    runner.status_path = Path(args.config).resolve().parent / statusfile.FILENAME
     _install_signal_handlers(runner)
     runner.run()
     return 0
