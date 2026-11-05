@@ -34,7 +34,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ServiceId = 'AIUsageBridge'
-$Version = '1.0.4'
+$Version = '1.0.5'
 $WinSWUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe'
 $WinSWSha256 = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
 $Src = $PSScriptRoot
@@ -112,10 +112,17 @@ function Remove-ExistingService {
 }
 
 function Stop-Tray {
-    # Cierra la app de bandeja de todos los usuarios (para poder reemplazar o borrar archivos).
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine -like '*ai_usage_tray.pyw*' } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    # Cierra la app de bandeja de todos los usuarios: primero le pide que se cierre
+    # (asi quita sus iconos y no quedan "fantasmas") y despues fuerza lo que quede.
+    $flag = Join-Path $InstallDir 'tray.stop'
+    $find = { @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -like '*ai_usage_tray.pyw*' }) }
+    if ((& $find).Count -and (Test-Path $InstallDir)) {
+        Set-Content -Path $flag -Value 'stop' -ErrorAction SilentlyContinue
+        for ($i = 0; $i -lt 16 -and (& $find).Count; $i++) { Start-Sleep -Milliseconds 500 }
+    }
+    & $find | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Remove-Item $flag -Force -ErrorAction SilentlyContinue
 }
 
 function New-Shortcut([string]$Path, [string]$Target, [string]$Arguments, [string]$Description) {

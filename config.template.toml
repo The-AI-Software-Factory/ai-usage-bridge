@@ -46,3 +46,5 @@ enabled = true
 show = ["claude", "codex", "cursor"]
 # Se abre al hacer clic en un ícono (por ejemplo, tu dashboard de Home Assistant).
 dashboard_url = ""
+# Mostrar los íconos en la barra (no escondidos en el menú ^) la primera vez.
+pin_icons = true

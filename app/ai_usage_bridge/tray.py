@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import winreg
 import os
 import subprocess
 import sys
@@ -36,6 +37,9 @@ SM_CXSMICON = 49
 TPM_RIGHTBUTTON, TPM_RETURNCMD = 0x2, 0x100
 MF_STRING, MF_SEPARATOR, MF_GRAYED = 0x0, 0x800, 0x1
 ERROR_ALREADY_EXISTS = 183
+NOTIFY_SETTINGS = r"Control Panel\NotifyIconSettings"
+PINNED_MARK = "AIUsageBridgePinned"  # marca propia: se fija una sola vez, después decide el usuario
+STOP_FILE = "tray.stop"  # el instalador lo crea para cerrar la bandeja prolijamente
 REFRESH_MS = 5000
 CMD_OPEN, CMD_REFRESH, CMD_CONFIG, CMD_LOGS, CMD_EXIT = 1, 2, 3, 4, 5
 
@@ -95,6 +99,8 @@ class Tray:
         self.hwnd = None
         self._wndproc = WNDPROC(self._proc)  # referencia viva para ctypes
         self.taskbar_created = user32.RegisterWindowMessageW("TaskbarCreated")
+        self.pin_pending = True
+        self.pin_attempts = 0
 
     # ------------------------------------------------------------ estado
     def _load(self) -> None:
@@ -168,6 +174,67 @@ class Tray:
             else:
                 self.rendered.pop(index, None)  # la barra todavía no existe: se reintenta
 
+    def _pin_once(self) -> None:
+        """Muestra los íconos en la barra (no en el menú ^) la primera vez que aparecen.
+
+        Windows 11 guarda cada ícono en HKCU\\Control Panel\\NotifyIconSettings con
+        IsPromoted. Se activa una sola vez por ícono (marca propia); si después el
+        usuario lo esconde, se respeta.
+        """
+        tray = (self.status or {}).get("tray") or {}
+        if tray.get("pin_icons") is False or not self.shown:
+            self.pin_pending = False
+            return
+        exe = Path(sys.executable).name.lower()
+        if exe != "aiusagetray.exe":
+            self.pin_pending = False  # solo con el ejecutable propio (no tocar otras apps de Python)
+            return
+        changed = []
+        found = 0
+        try:
+            root = winreg.OpenKey(winreg.HKEY_CURRENT_USER, NOTIFY_SETTINGS)
+        except OSError:
+            self.pin_pending = False
+            return
+        with root:
+            index = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(root, index)
+                except OSError:
+                    break
+                index += 1
+                try:
+                    with winreg.OpenKey(root, name, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+                        path = str(winreg.QueryValueEx(key, "ExecutablePath")[0])
+                        if not path.lower().endswith("\\" + exe):
+                            continue
+                        found += 1
+                        try:
+                            winreg.QueryValueEx(key, PINNED_MARK)
+                            continue  # ya lo hicimos antes
+                        except OSError:
+                            pass
+                        try:
+                            uid = int(winreg.QueryValueEx(key, "UID")[0])
+                        except OSError:
+                            uid = None
+                        winreg.SetValueEx(key, "IsPromoted", 0, winreg.REG_DWORD, 1)
+                        winreg.SetValueEx(key, PINNED_MARK, 0, winreg.REG_DWORD, 1)
+                        changed.append(uid)
+                except OSError:
+                    continue
+        self.pin_attempts += 1
+        # Windows crea las entradas al agregar los íconos; se reintenta unos minutos.
+        if found >= len(self.shown) or self.pin_attempts >= 60:
+            self.pin_pending = False
+        # Se vuelven a agregar para que Windows aplique el cambio en el momento.
+        for uid in changed:
+            if uid in self.shown:
+                self._remove(uid)
+        if changed:
+            self.refresh(force=True)
+
     def _remove(self, uid: int) -> None:
         nid = self._nid(uid)
         shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
@@ -227,7 +294,12 @@ class Tray:
                 self._menu()
             return 0
         if msg == WM_TIMER:
+            if (self.install_dir / STOP_FILE).exists():
+                user32.DestroyWindow(hwnd)  # actualización o desinstalación en curso
+                return 0
             self.refresh()
+            if self.pin_pending:
+                self._pin_once()
             return 0
         if msg == self.taskbar_created:  # Explorer se reinició: hay que volver a agregar los íconos
             self.shown.clear()

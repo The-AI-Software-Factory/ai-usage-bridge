@@ -49,6 +49,7 @@ def build_status(states: dict[str, dict], summary: dict, tray_cfg: dict) -> dict
             "enabled": bool(tray_cfg.get("enabled", True)),
             "show": list(tray_cfg.get("show") or list(providers)),
             "dashboard_url": str(tray_cfg.get("dashboard_url") or ""),
+            "pin_icons": bool(tray_cfg.get("pin_icons", True)),
         },
     }
 

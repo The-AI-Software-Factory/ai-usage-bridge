@@ -44,9 +44,15 @@ try {
     # 1b. App de bandeja: inicio automatico y procesos abiertos
     $runKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
     Remove-ItemProperty -Path $runKey -Name 'AIUsageBridgeTray' -ErrorAction SilentlyContinue
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine -like '*ai_usage_tray.pyw*' } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    # Primero se le pide que se cierre (quita sus iconos); despues se fuerza lo que quede.
+    $flag = Join-Path $InstallDir 'tray.stop'
+    $find = { @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -like '*ai_usage_tray.pyw*' }) }
+    if ((& $find).Count -and (Test-Path $InstallDir)) {
+        Set-Content -Path $flag -Value 'stop' -ErrorAction SilentlyContinue
+        for ($i = 0; $i -lt 16 -and (& $find).Count; $i++) { Start-Sleep -Milliseconds 500 }
+    }
+    & $find | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
     # 2. Entidades de Home Assistant (antes de borrar la config)
     $config = Join-Path $InstallDir 'config.toml'

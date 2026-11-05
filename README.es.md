@@ -225,7 +225,7 @@ Además de Home Assistant, el servicio muestra **un ícono por IA en el área de
 Los íconos arrancan al iniciar sesión en Windows, para todos los usuarios de la PC, y funcionan aunque no uses MQTT ni Home Assistant. Solo leen `status.json`, un archivo que escribe el servicio con los números de uso y nada más (sin tokens ni contraseñas).
 
 > [!TIP]
-> Windows 11 esconde los íconos nuevos en el menú de desborde (`^`). Arrastrá los tres a la barra de tareas, o activalos en **Configuración → Personalización → Barra de tareas → Otros íconos de la bandeja del sistema** (aparecen como *AIUsageTray*).
+> La primera vez que aparecen, los íconos le piden a Windows que los muestre en la barra en lugar de esconderlos en el menú de desborde (`^`). Si después escondés alguno, se respeta. Para cambiarlo, usá **Configuración → Personalización → Barra de tareas → Otros íconos de la bandeja del sistema** (aparecen como *AIUsageTray*); Windows 11 no siempre deja arrastrarlos desde el menú de desborde.
 
 Con el MSI, los íconos aparecen en el próximo inicio de sesión, o en el momento desde **menú Inicio → AI Usage Bridge → AI Usage Bridge (bandeja)**.
 
@@ -256,6 +256,7 @@ Restart-Service AIUsageBridge
 | `tray.enabled` | `true` | Muestra los íconos en la bandeja |
 | `tray.show` | `["claude", "codex", "cursor"]` | Qué IAs tienen ícono y en qué orden |
 | `tray.dashboard_url` | — | URL que se abre al hacer clic en un ícono (se carga con **Configurar AI Usage Bridge**) |
+| `tray.pin_icons` | `true` | Muestra los íconos en la barra la primera vez que aparecen |
 
 ### Mantener actualizados los datos de Claude
 

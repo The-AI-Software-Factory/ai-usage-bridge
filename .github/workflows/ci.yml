@@ -126,6 +126,14 @@ jobs:
           $icons = Get-ChildItem "$env:LOCALAPPDATA\AIUsageBridge\icons" -Filter *.ico -ErrorAction SilentlyContinue
           if (@($icons).Count -lt 3) { throw 'Tray icons were not rendered' }
           "Tray OK: $($procs.Count) process(es), $(@($icons).Count) icons"
+          # Cierre prolijo: el instalador crea tray.stop y la app se cierra sola quitando sus iconos
+          Set-Content "$dir\tray.stop" 'stop'
+          for ($i = 0; $i -lt 20 -and @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*ai_usage_tray.pyw*' }).Count; $i++) { Start-Sleep -Milliseconds 500 }
+          if (@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*ai_usage_tray.pyw*' }).Count) { throw 'Tray did not close on tray.stop' }
+          Remove-Item "$dir\tray.stop"
+          Start-Process "$dir\python\AIUsageTray.exe" -ArgumentList "`"$dir\app\ai_usage_tray.pyw`""
+          Start-Sleep -Seconds 3
+          'Tray graceful stop OK'
       - name: Upgrade keeps the broker settings
         if: matrix.kind == 'setup'
         shell: powershell
