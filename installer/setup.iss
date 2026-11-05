@@ -61,7 +61,11 @@ es.MqttHost=Host o IP (por ejemplo 192.168.1.10):
 es.MqttPort=Puerto:
 es.MqttUser=Usuario:
 es.MqttPassword=Contraseña:
-es.DashboardUrl=URL que abren los íconos de la bandeja (opcional, por ejemplo http://192.168.1.10:8123/):
+es.UrlInvalid=La URL tiene que empezar con http:// o https://.
+es.TrayTitle=Bandeja
+es.TraySubtitle=Íconos con el % libre de cada IA
+es.TrayHelp=Junto al reloj de Windows aparece un ícono por IA con su margen libre. Al hacer clic se abre esta URL, por ejemplo tu dashboard de Home Assistant. Es opcional.
+es.DashboardUrl=URL del dashboard (por ejemplo http://192.168.1.10:8123/):
 es.MqttHostRequired=Ingresá el host o la IP del broker MQTT.
 es.MqttPortInvalid=El puerto tiene que ser un número entre 1 y 65535.
 es.MqttUpgrade=Se muestra la configuración actual; podés modificarla. Dejá la contraseña vacía para conservar la guardada.
@@ -78,7 +82,11 @@ en.MqttHost=Host or IP (for example 192.168.1.10):
 en.MqttPort=Port:
 en.MqttUser=Username:
 en.MqttPassword=Password:
-en.DashboardUrl=URL opened by the tray icons (optional, for example http://192.168.1.10:8123/):
+en.UrlInvalid=The URL must start with http:// or https://.
+en.TrayTitle=Tray
+en.TraySubtitle=Icons with the free % of each AI
+en.TrayHelp=One icon per AI appears next to the Windows clock with its free headroom. Clicking it opens this URL, for example your Home Assistant dashboard. Optional.
+en.DashboardUrl=Dashboard URL (for example http://192.168.1.10:8123/):
 en.MqttHostRequired=Enter the host or IP of the MQTT broker.
 en.MqttPortInvalid=The port must be a number between 1 and 65535.
 en.MqttUpgrade=Your current settings are shown; you can change them. Leave the password empty to keep the saved one.
@@ -95,6 +103,7 @@ Source: "{#StageDir}\*"; DestDir: "{tmp}\payload"; Flags: recursesubdirs createa
 [Code]
 var
   MqttPage: TInputQueryWizardPage;
+  TrayPage: TInputQueryWizardPage;
   ClaudePage: TInputOptionWizardPage;
 
 function ConfigPath: String;
@@ -182,17 +191,21 @@ begin
   MqttPage.Add(CustomMessage('MqttPort'), False);
   MqttPage.Add(CustomMessage('MqttUser'), False);
   MqttPage.Add(CustomMessage('MqttPassword'), True);
-  MqttPage.Add(CustomMessage('DashboardUrl'), False);
   { En una actualizacion se precargan los valores actuales (la contrasena no se muestra). }
   MqttPage.Values[0] := ParamOrConfig('MQTTHOST', 'host', '');
   MqttPage.Values[1] := ParamOrConfig('MQTTPORT', 'port', '1883');
   MqttPage.Values[2] := ParamOrConfig('MQTTUSER', 'username', '');
   MqttPage.Values[3] := ExpandConstant('{param:MQTTPASSWORD|}');
-  MqttPage.Values[4] := ParamOrConfig('DASHBOARDURL', 'dashboard_url', '');
+
 
   ClaudePage := CreateInputOptionPage(MqttPage.ID,
     CustomMessage('ClaudeTitle'), CustomMessage('ClaudeSubtitle'), CustomMessage('ClaudeHelp'), False, False);
   ClaudePage.Add(CustomMessage('ClaudeRefresh'));
+
+  TrayPage := CreateInputQueryPage(ClaudePage.ID,
+    CustomMessage('TrayTitle'), CustomMessage('TraySubtitle'), CustomMessage('TrayHelp'));
+  TrayPage.Add(CustomMessage('DashboardUrl'), False);
+  TrayPage.Values[0] := ParamOrConfig('DASHBOARDURL', 'dashboard_url', '');
   if ExpandConstant('{param:CLAUDEREFRESH|}') <> '' then
     ClaudePage.Values[0] := ExpandConstant('{param:CLAUDEREFRESH|}') = '1'
   else if IsUpgrade then
@@ -201,11 +214,25 @@ begin
     ClaudePage.Values[0] := True;
 end;
 
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = TrayPage.ID) and (Trim(TrayPage.Values[0]) = '') and (Trim(MqttPage.Values[0]) <> '') then
+    TrayPage.Values[0] := 'http://' + Trim(MqttPage.Values[0]) + ':8123/';
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   Port: Integer;
 begin
   Result := True;
+  if (CurPageID = TrayPage.ID) and (Trim(TrayPage.Values[0]) <> '') and
+     (Pos('http://', LowerCase(Trim(TrayPage.Values[0]))) <> 1) and
+     (Pos('https://', LowerCase(Trim(TrayPage.Values[0]))) <> 1) then
+  begin
+    MsgBox(CustomMessage('UrlInvalid'), mbError, MB_OK);
+    Result := False;
+    Exit;
+  end;
   if CurPageID = MqttPage.ID then
   begin
     if Trim(MqttPage.Values[0]) = '' then
@@ -247,8 +274,8 @@ begin
     ' -UserProfileDir "' + ExpandConstant('{%USERPROFILE}') + '"' +
     ' -AppDataDir "' + ExpandConstant('{userappdata}') + '"' +
     ' -InstallDir "' + ExpandConstant('{app}') + '"';
-  if Clean(MqttPage.Values[4]) <> '' then
-    Params := Params + ' -DashboardUrl "' + Clean(MqttPage.Values[4]) + '"';
+  if Clean(TrayPage.Values[0]) <> '' then
+    Params := Params + ' -DashboardUrl "' + Clean(TrayPage.Values[0]) + '"';
   if ClaudePage.Values[0] then
     Params := Params + ' -ClaudeRefresh true'
   else
