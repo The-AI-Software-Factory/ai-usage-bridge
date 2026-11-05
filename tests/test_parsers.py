@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
@@ -19,6 +20,12 @@ from ai_usage_bridge.providers.cursor import CursorProvider  # noqa: E402
 from ai_usage_bridge.publisher import Publisher  # noqa: E402
 from ai_usage_bridge.util import rollover_windows  # noqa: E402
 from ai_usage_bridge.providers.base import TokenExpired  # noqa: E402
+
+def _jwt(claims):
+    import base64 as _b
+    enc = lambda d: _b.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+    return f"{enc({'alg': 'none'})}.{enc(claims)}.sig"
+
 
 FUTURE = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=3)).isoformat()
 PAST = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).isoformat()
@@ -90,10 +97,11 @@ def test_cursor_parse_and_db(tmp_path):
     db = tmp_path / "state.vscdb"
     con = sqlite3.connect(db)
     con.execute("CREATE TABLE ItemTable (key TEXT UNIQUE, value BLOB)")
-    con.execute("INSERT INTO ItemTable VALUES ('cursorAuth/accessToken', 'abc.def.ghi')")
+    con.execute("INSERT INTO ItemTable VALUES ('cursorAuth/accessToken', ?)", (_jwt({"sub": "auth0|user_123"}),))
     con.commit()
     con.close()
-    assert CursorProvider({"state_db": str(db)}, S)._read_token() == "abc.def.ghi"
+    token, user_id = CursorProvider({"state_db": str(db)}, S)._read_token()
+    assert user_id == "user_123" and token.count(".") == 2
 
 
 def test_rollover_shared_reset():
@@ -227,3 +235,104 @@ def test_credentials_change_triggers_poll(tmp_path):
     cred.write_text("{}")  # aparece el archivo (por ejemplo, después de /login)
     assert r.credentials_changed(p)
     assert not r.credentials_changed(p)
+
+
+# --- Token cifrado de Cursor (cursor-safe-storage:v1, Cursor >= 3.27) ----------
+
+def _cursor_install(tmp_path, token_value, profile=None, wrapped_key=b"DPAPI" + b"k" * 32):
+    """Arma ...\\Cursor\\Local State y ...\\Cursor\\User\\globalStorage\\state.vscdb."""
+    import base64 as _b
+    gs = tmp_path / "Cursor" / "User" / "globalStorage"
+    gs.mkdir(parents=True)
+    (tmp_path / "Cursor" / "Local State").write_text(
+        json.dumps({"os_crypt": {"encrypted_key": _b.b64encode(wrapped_key).decode()}}))
+    con = sqlite3.connect(gs / "state.vscdb")
+    con.execute("CREATE TABLE ItemTable (key TEXT UNIQUE, value BLOB)")
+    con.execute("INSERT INTO ItemTable VALUES ('cursorAuth/accessToken', ?)", (token_value,))
+    if profile is not None:
+        con.execute("INSERT INTO ItemTable VALUES ('cursorAuth/cachedScopedProfile', ?)", (json.dumps(profile),))
+    con.commit()
+    con.close()
+    return gs / "state.vscdb"
+
+
+def _seal(key, plain):
+    import base64 as _b, os as _os
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce = _os.urandom(12)
+    blob = b"v10" + nonce + AESGCM(key).encrypt(nonce, plain.encode(), None)
+    return "cursor-safe-storage:v1:" + _b.b64encode(blob).decode()
+
+
+def _fake_unprotect(data):
+    return data  # en el test la "clave protegida" es la clave misma
+
+
+def test_cursor_encrypted_token(tmp_path):
+    from ai_usage_bridge import winsecret
+    key = b"k" * 32
+    db = _cursor_install(tmp_path, _seal(key, _jwt({"sub": "auth0|user_abc", "exp": time.time() + 3600})))
+    p = CursorProvider({"state_db": str(db)}, S)
+    p._safe = winsecret.SafeStorage(p.local_state_path, unprotect=_fake_unprotect)
+    token, user_id = p._read_token()
+    assert user_id == "user_abc" and token.startswith("ey")
+
+
+def test_cursor_opaque_token_uses_cached_profile(tmp_path):
+    from ai_usage_bridge import winsecret
+    db = _cursor_install(tmp_path, _seal(b"k" * 32, "opaque-token"), profile={"authId": "google-oauth2|user_xyz"})
+    p = CursorProvider({"state_db": str(db)}, S)
+    p._safe = winsecret.SafeStorage(p.local_state_path, unprotect=_fake_unprotect)
+    assert p._read_token() == ("opaque-token", "user_xyz")
+
+
+def test_cursor_wrong_key_is_reported(tmp_path):
+    from ai_usage_bridge import winsecret
+    from ai_usage_bridge.providers.base import ProviderError
+    db = _cursor_install(tmp_path, _seal(b"x" * 32, "t"))  # cifrado con otra clave
+    p = CursorProvider({"state_db": str(db)}, S)
+    p._safe = winsecret.SafeStorage(p.local_state_path, unprotect=_fake_unprotect)
+    try:
+        p._read_token()
+        raise AssertionError("debía fallar")
+    except ProviderError as exc:
+        assert "descifrar" in str(exc)
+    assert p._safe._key is None  # la clave en memoria se descarta
+
+
+def test_cursor_no_session_status(tmp_path):
+    from ai_usage_bridge import winsecret
+    from ai_usage_bridge.providers.base import NoSession
+
+    def no_session(data):
+        raise winsecret.NoUserSession("sin sesión")
+
+    db = _cursor_install(tmp_path, _seal(b"k" * 32, "t"))
+    p = CursorProvider({"state_db": str(db)}, S)
+    p._safe = winsecret.SafeStorage(p.local_state_path, unprotect=no_session)
+    try:
+        p._read_token()
+        raise AssertionError("debía fallar")
+    except NoSession as exc:
+        assert exc.status == "sin_sesion"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="DPAPI real solo en Windows")
+def test_cursor_encrypted_token_real_dpapi(tmp_path):
+    """En Windows: clave protegida con DPAPI real, como la guarda Cursor."""
+    import ctypes
+    from ctypes import wintypes
+
+    class BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    key = bytes(range(32))
+    buf = ctypes.create_string_buffer(key, len(key))
+    blob_in, blob_out = BLOB(len(key), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), BLOB()
+    assert ctypes.windll.crypt32.CryptProtectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out))
+    wrapped = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+    ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+
+    db = _cursor_install(tmp_path, _seal(key, _jwt({"sub": "auth0|user_win"})), wrapped_key=b"DPAPI" + wrapped)
+    token, user_id = CursorProvider({"state_db": str(db)}, S)._read_token()  # DPAPI real, sin simular
+    assert user_id == "user_win"

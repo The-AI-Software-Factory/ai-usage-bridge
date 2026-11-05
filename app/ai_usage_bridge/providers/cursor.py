@@ -2,10 +2,14 @@
 
 Lee el token de sesión que Cursor guarda en su base local (state.vscdb) y consulta
 el mismo endpoint que usa el dashboard web. No es una API pública.
+
+Desde Cursor 3.27 el token se guarda cifrado (``cursor-safe-storage:v1:``); se
+descifra en memoria con la clave del usuario (ver ``winsecret``).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sqlite3
@@ -13,10 +17,12 @@ import tempfile
 import time
 from pathlib import Path
 
+from .. import winsecret
 from ..util import iso, jwt_claims, now_utc, num, parse_time, pct
 from .base import (
     COMMON_ENTITIES,
     CredentialsMissing,
+    NoSession,
     Provider,
     ProviderError,
     TokenExpired,
@@ -26,6 +32,7 @@ from .base import (
 )
 
 SUMMARY_URL = "https://cursor.com/api/usage-summary"
+KEYS = ("cursorAuth/accessToken", "cursorAuth/cachedScopedProfile")
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"
@@ -56,12 +63,37 @@ class CursorProvider(Provider):
     def path(self) -> Path:
         return Path(os.path.expandvars(self.cfg.get("state_db", "")))
 
-    def _read_token(self) -> str:
-        if self.cfg.get("session_token"):
-            return self.cfg["session_token"]
+    def __init__(self, cfg: dict, http):
+        super().__init__(cfg, http)
+        self._safe = winsecret.SafeStorage(self.local_state_path)
+
+    @property
+    def local_state_path(self) -> Path:
+        if self.cfg.get("local_state"):
+            return Path(os.path.expandvars(self.cfg["local_state"]))
+        # ...\Cursor\User\globalStorage\state.vscdb -> ...\Cursor\Local State
+        parents = self.path.parents
+        return (parents[2] if len(parents) > 2 else self.path.parent) / "Local State"
+
+    def _query(self, db: Path, uri: bool) -> dict[str, str]:
+        target = db.resolve().as_uri() + "?mode=ro" if uri else str(db)
+        con = sqlite3.connect(target, uri=uri, timeout=5)
+        try:
+            marks = ",".join("?" * len(KEYS))
+            rows = con.execute(f"SELECT key, value FROM ItemTable WHERE key IN ({marks})", KEYS).fetchall()
+        finally:
+            con.close()
+        return {k: (v.decode() if isinstance(v, bytes) else str(v)) for k, v in rows if v}
+
+    def _read_items(self) -> dict[str, str]:
         if not self.path.is_file():
             raise CredentialsMissing(f"No existe {self.path}. ¿Cursor está instalado y logueado?")
-        # Copiamos la base (y su WAL) porque Cursor la mantiene abierta.
+        try:
+            # Lectura directa en solo lectura (la base puede pesar más de 1 GB).
+            return self._query(self.path, uri=True)
+        except sqlite3.Error:
+            pass
+        # Respaldo: copia de la base y su WAL (si Cursor la tiene bloqueada).
         with tempfile.TemporaryDirectory(prefix="aiub-") as tmp:
             dst = Path(tmp) / "state.vscdb"
             shutil.copy2(self.path, dst)
@@ -69,27 +101,42 @@ class CursorProvider(Provider):
                 side = self.path.with_name(self.path.name + suffix)
                 if side.is_file():
                     shutil.copy2(side, dst.with_name(dst.name + suffix))
-            con = sqlite3.connect(dst)
+            return self._query(dst, uri=False)
+
+    def _read_token(self) -> tuple[str, str]:
+        """Devuelve (token, userId)."""
+        if self.cfg.get("session_token"):
+            token = self.cfg["session_token"]
+            items = {}
+        else:
+            items = self._read_items()
+            token = items.get("cursorAuth/accessToken", "").strip().strip('"')
+            if not token:
+                raise CredentialsMissing("Cursor no tiene sesión iniciada (cursorAuth/accessToken vacío)")
+            if winsecret.is_encrypted(token):
+                try:
+                    token = self._safe.decrypt(token).strip().strip('"')
+                except winsecret.NoUserSession as exc:
+                    raise NoSession(str(exc)) from exc
+                except winsecret.SecretError as exc:
+                    raise ProviderError(f"Cursor: {exc}") from exc
+        user_id = str(jwt_claims(token).get("sub", "")).split("|")[-1]
+        if not user_id:
+            # Respaldo: Cursor también guarda el perfil con authId = "issuer|userId".
             try:
-                row = con.execute(
-                    "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'"
-                ).fetchone()
-            finally:
-                con.close()
-        if not row or not row[0]:
-            raise CredentialsMissing("Cursor no tiene sesión iniciada (cursorAuth/accessToken vacío)")
-        value = row[0]
-        return value.decode() if isinstance(value, bytes) else str(value)
+                profile = json.loads(items.get("cursorAuth/cachedScopedProfile", "{}"))
+                user_id = str(profile.get("authId", "")).split("|")[-1]
+            except (ValueError, AttributeError):
+                user_id = ""
+        if not user_id:
+            raise CredentialsMissing("No pude obtener el userId de la sesión de Cursor")
+        return token, user_id
 
     def fetch_raw(self) -> dict:
-        token = self._read_token().strip().strip('"')
-        claims = jwt_claims(token)
-        exp = claims.get("exp")
+        token, user_id = self._read_token()
+        exp = jwt_claims(token).get("exp")
         if exp and float(exp) < time.time() + 60:
             raise TokenExpired("El token de Cursor venció. Abrí Cursor para que lo renueve.")
-        user_id = str(claims.get("sub", "")).split("|")[-1]
-        if not user_id:
-            raise CredentialsMissing("No pude obtener el userId del token de Cursor")
         resp = self.http.get(
             SUMMARY_URL,
             headers={

@@ -42,7 +42,7 @@ If you work with several AI coding agents, each one has its own limits: a 5‑ho
 |---|---|---|
 | **Claude** (Pro / Max) | 5‑hour and weekly usage, per‑model weekly limits, extra credits, reset times | Claude Code login |
 | **ChatGPT / Codex** (ChatGPT plans that include Codex) | 5‑hour and weekly usage, reset times, credits, plan | Codex login with your ChatGPT account |
-| **Cursor** (individual plans) | Included usage %, Cursor vs. other models, on‑demand spend and limit, billing cycle end | Cursor desktop app login |
+| **Cursor** (individual plans) | Included usage %, Cursor vs. other models, on‑demand spend and limit, billing cycle end | Cursor desktop app login (also the encrypted login of Cursor 3.27+) |
 
 You can enable any subset of them. The Claude limits are shared between claude.ai chats and Claude Code, so the numbers match the **Settings → Usage** page; the same applies to the Codex limits shown in ChatGPT's settings.
 
@@ -280,6 +280,7 @@ Check the **Estado** (status) sensor of each service; its `error` attribute has 
 | `ok` | Last read succeeded | — |
 | `sin_credenciales` | The tool isn't installed or signed in on this PC, or the path is different | Sign in, or fix the path in `config.toml` |
 | `token_vencido` | The stored token expired or was rejected | For Claude, see [Keeping Claude data fresh](#keeping-claude-data-fresh); for Codex or Cursor, open the app once |
+| `sin_sesion` | Cursor stores its login encrypted with your Windows user's key, and that user isn't signed in to Windows | Nothing; it's read as soon as you sign in |
 | `rate_limited` | The vendor asked to slow down | Nothing; the service waits and retries. Don't lower the intervals below the defaults |
 | `error` | Network error or an unexpected response | Run the diagnostics below and open an issue |
 
@@ -301,6 +302,7 @@ If a vendor changed its response format, `--dump` shows the new shape. Please at
 ## Security and privacy
 
 - **No new credentials.** The bridge reuses the sessions already stored by Claude Code, Codex and Cursor on your PC.
+- **Encrypted Cursor login.** Since 3.27, Cursor encrypts its token with a key protected by your Windows user (DPAPI). The service decrypts it in memory by briefly using the identity of your open Windows session, the standard mechanism for services, so it can only read Cursor while you're signed in to Windows. The decrypted token is never written to disk.
 - **Tokens stay local.** They're sent only to the vendor that issued them, over HTTPS. They're never published to MQTT, written to logs or included in `--dump` output.
 - **Minimal writes.** The only file it writes outside its own folder is the Claude Code credentials file, and only when automatic renewal is on and the token has expired.
 - **Locked‑down config.** `config.toml` is readable only by `SYSTEM` and Administrators.

@@ -111,7 +111,7 @@ Copy-Item $winsw "$stage\winsw\WinSW-x64.exe"
 
 # --- 6. Prueba con el Python embebido ---------------------------------------
 Write-Step 'Prueba del paquete con el Python embebido'
-$out = & "$stage\python\python.exe" -c "import ai_usage_bridge, ai_usage_bridge.main, paho.mqtt.client, requests, sqlite3, tomllib; print(ai_usage_bridge.__version__)"
+$out = & "$stage\python\python.exe" -c "import ai_usage_bridge, ai_usage_bridge.main, ai_usage_bridge.winsecret, paho.mqtt.client, requests, sqlite3, tomllib, cryptography.hazmat.primitives.ciphers.aead; print(ai_usage_bridge.__version__)"
 Assert-Exit 'Prueba del Python embebido'
 if ("$out".Trim() -ne $Version) { throw "La version empaquetada ($out) no coincide con $Version" }
 Write-Host "OK ($out)"

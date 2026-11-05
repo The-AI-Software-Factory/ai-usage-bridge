@@ -42,7 +42,7 @@ Si trabajás con varios agentes de IA, cada uno tiene sus propios límites: una 
 |---|---|---|
 | **Claude** (Pro / Max) | Uso de 5 h y semanal, límites semanales por modelo, créditos extra, horarios de reset | Login de Claude Code |
 | **ChatGPT / Codex** (planes de ChatGPT que incluyen Codex) | Uso de 5 h y semanal, horarios de reset, créditos, plan | Login de Codex con tu cuenta de ChatGPT |
-| **Cursor** (planes individuales) | % de uso incluido, modelos de Cursor vs. otros, gasto on‑demand y su límite, fin del ciclo de facturación | Login de la app de escritorio de Cursor |
+| **Cursor** (planes individuales) | % de uso incluido, modelos de Cursor vs. otros, gasto on‑demand y su límite, fin del ciclo de facturación | Login de la app de escritorio de Cursor (también el login cifrado de Cursor 3.27+) |
 
 Podés habilitar los que quieras. Los límites de Claude son compartidos entre los chats de claude.ai y Claude Code, así que los números coinciden con **Configuración → Uso**. Lo mismo pasa con los límites de Codex que muestra la configuración de ChatGPT.
 
@@ -277,6 +277,7 @@ Mirá el sensor **Estado** de cada servicio; su atributo `error` tiene el detall
 | `ok` | La última lectura funcionó | — |
 | `sin_credenciales` | La herramienta no está instalada o logueada en esta PC, o la ruta es otra | Iniciá sesión o corregí la ruta en `config.toml` |
 | `token_vencido` | El token guardado venció o fue rechazado | Para Claude, ver [Mantener actualizados los datos de Claude](#mantener-actualizados-los-datos-de-claude); para Codex o Cursor, abrí la app una vez |
+| `sin_sesion` | Cursor guarda el login cifrado con la clave de tu usuario de Windows y ese usuario no tiene la sesión iniciada | Nada: se lee apenas iniciás sesión |
 | `rate_limited` | El proveedor pidió bajar la frecuencia | Nada: el servicio espera y reintenta. No bajes los intervalos por debajo de los valores por defecto |
 | `error` | Error de red o respuesta inesperada | Corré el diagnóstico de abajo y abrí un issue |
 
@@ -298,6 +299,7 @@ Si un proveedor cambió el formato de su respuesta, `--dump` muestra la forma nu
 ## Seguridad y privacidad
 
 - **Sin credenciales nuevas.** El bridge reutiliza las sesiones que Claude Code, Codex y Cursor ya guardan en tu PC.
+- **Login cifrado de Cursor.** Desde la 3.27, Cursor cifra su token con una clave protegida por tu usuario de Windows (DPAPI). El servicio lo descifra en memoria usando por un momento la identidad de tu sesión de Windows abierta, el mecanismo estándar de los servicios, así que solo puede leer Cursor mientras tengas la sesión iniciada. El token descifrado nunca se escribe en disco.
 - **Los tokens no salen de tu PC**, salvo hacia el proveedor que los emitió, por HTTPS. Nunca se publican en MQTT, ni se escriben en los logs, ni aparecen en la salida de `--dump`.
 - **Escrituras mínimas.** El único archivo que escribe fuera de su carpeta es el de credenciales de Claude Code, y solo con la renovación automática activada y el token ya vencido.
 - **Config protegida.** `config.toml` solo lo pueden leer `SYSTEM` y los administradores.

@@ -19,6 +19,12 @@ class TokenExpired(ProviderError):
     status = "token_vencido"
 
 
+class NoSession(ProviderError):
+    """El secreto necesita una sesión de Windows abierta del usuario."""
+
+    status = "sin_sesion"
+
+
 class RateLimited(ProviderError):
     status = "rate_limited"
 
