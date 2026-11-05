@@ -11,4 +11,4 @@ for sub in ("app", "lib"):
 
 from ai_usage_bridge.tray import main  # noqa: E402
 
-raise SystemExit(main([str(INSTALL_DIR)]))
+raise SystemExit(main([str(INSTALL_DIR), *sys.argv[1:]]))

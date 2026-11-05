@@ -114,15 +114,20 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $dir = "$env:ProgramData\AIUsageBridge"
           $run = (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run').AIUsageBridgeTray
-          if ($run -notlike '*AIUsageTray.exe*ai_usage_tray.pyw*') { throw "Tray autostart missing: $run" }
+          if ($run -notlike '*pythonw.exe*ai_usage_tray.pyw*') { throw "Tray autostart missing: $run" }
+          foreach ($ai in 'Claude', 'Codex', 'Cursor') {
+            $desc = (Get-Item "$dir\python\AIUsage-$ai.exe").VersionInfo.FileDescription
+            if ($desc -ne "$ai - AI Usage") { throw "AIUsage-$ai.exe description is '$desc'" }
+          }
           for ($i = 0; $i -lt 30 -and -not (Test-Path "$dir\status.json"); $i++) { Start-Sleep -Seconds 1 }
           $status = Get-Content "$dir\status.json" -Raw | ConvertFrom-Json
           if (-not $status.providers.claude) { throw 'status.json without providers' }
           if ((Get-Content "$dir\status.json" -Raw) -match 'Bearer|accessToken|password') { throw 'status.json leaks secrets' }
-          Start-Process "$dir\python\AIUsageTray.exe" -ArgumentList "`"$dir\app\ai_usage_tray.pyw`""
+          Start-Process "$dir\python\pythonw.exe" -ArgumentList "`"$dir\app\ai_usage_tray.pyw`""
           Start-Sleep -Seconds 8
           $procs = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*ai_usage_tray.pyw*' })
-          if ($procs.Count -lt 1) { throw 'Tray app is not running' }
+          $names = ($procs | ForEach-Object { $_.Name } | Sort-Object -Unique) -join ', '
+          if ($procs.Count -lt 3 -or $names -notmatch 'AIUsage-Claude' -or $names -notmatch 'AIUsage-Cursor') { throw "Expected one tray process per AI, got: $names" }
           $icons = Get-ChildItem "$env:LOCALAPPDATA\AIUsageBridge\icons" -Filter *.ico -ErrorAction SilentlyContinue
           if (@($icons).Count -lt 3) { throw 'Tray icons were not rendered' }
           "Tray OK: $($procs.Count) process(es), $(@($icons).Count) icons"
@@ -131,7 +136,7 @@ jobs:
           for ($i = 0; $i -lt 20 -and @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*ai_usage_tray.pyw*' }).Count; $i++) { Start-Sleep -Milliseconds 500 }
           if (@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*ai_usage_tray.pyw*' }).Count) { throw 'Tray did not close on tray.stop' }
           Remove-Item "$dir\tray.stop"
-          Start-Process "$dir\python\AIUsageTray.exe" -ArgumentList "`"$dir\app\ai_usage_tray.pyw`""
+          Start-Process "$dir\python\pythonw.exe" -ArgumentList "`"$dir\app\ai_usage_tray.pyw`""
           Start-Sleep -Seconds 3
           'Tray graceful stop OK'
       - name: Upgrade keeps the broker settings

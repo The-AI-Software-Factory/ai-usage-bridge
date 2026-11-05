@@ -225,7 +225,7 @@ Además de Home Assistant, el servicio muestra **un ícono por IA en el área de
 Los íconos arrancan al iniciar sesión en Windows, para todos los usuarios de la PC, y funcionan aunque no uses MQTT ni Home Assistant. Solo leen `status.json`, un archivo que escribe el servicio con los números de uso y nada más (sin tokens ni contraseñas).
 
 > [!TIP]
-> La primera vez que aparecen, los íconos le piden a Windows que los muestre en la barra en lugar de esconderlos en el menú de desborde (`^`). Si después escondés alguno, se respeta. Para cambiarlo, usá **Configuración → Personalización → Barra de tareas → Otros íconos de la bandeja del sistema** (aparecen como *AIUsageTray*); Windows 11 no siempre deja arrastrarlos desde el menú de desborde.
+> La primera vez que aparecen, los íconos le piden a Windows que los muestre en la barra en lugar de esconderlos en el menú de desborde (`^`). Si después escondés alguno, se respeta. Para cambiarlo, usá **Configuración → Personalización → Barra de tareas → Otros íconos de la bandeja del sistema** (aparecen como *Claude - AI Usage*, *Codex - AI Usage* y *Cursor - AI Usage*); Windows 11 no siempre deja arrastrarlos desde el menú de desborde.
 
 Con el MSI, los íconos aparecen en el próximo inicio de sesión, o en el momento desde **menú Inicio → AI Usage Bridge → AI Usage Bridge (bandeja)**.
 

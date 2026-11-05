@@ -392,3 +392,25 @@ def test_runner_writes_status(tmp_path):
     r.write_status()
     data = json.loads((tmp_path / "status.json").read_text(encoding="utf-8"))
     assert data["providers"]["claude"]["status"] == "sin_credenciales" and data["stopped"] is False
+
+
+def test_pe_strip_signature():
+    import importlib.util, struct as st
+    spec = importlib.util.spec_from_file_location("pes", Path(__file__).resolve().parents[1] / "build" / "pe_strip_signature.py")
+    pes = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pes)
+    # PE32+ mínimo con una "firma" de 24 bytes al final
+    body = bytearray(0x200)
+    body[:2] = b"MZ"
+    st.pack_into("<I", body, 0x3C, 0x80)
+    body[0x80:0x84] = b"PE\0\0"
+    opt = 0x80 + 24
+    st.pack_into("<H", body, opt, 0x20B)
+    st.pack_into("<I", body, opt + 64, 0xABCD)
+    cert = b"C" * 24
+    st.pack_into("<II", body, opt + 112 + 4 * 8, len(body), len(cert))
+    signed = bytes(body) + cert
+    out, had = pes.strip_signature(signed)
+    assert had and len(out) == len(body) and b"CCCC" not in out
+    assert st.unpack_from("<II", out, opt + 112 + 32) == (0, 0)
+    assert pes.strip_signature(out) == (out, False)

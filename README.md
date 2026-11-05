@@ -228,7 +228,7 @@ Besides Home Assistant, the service shows **one icon per AI in the Windows notif
 The icons start when you sign in to Windows, for every user of the PC, and work even without MQTT or Home Assistant. They only read `status.json`, a file the service writes with the usage numbers and nothing else (no tokens or passwords).
 
 > [!TIP]
-> The first time they appear, the icons ask Windows to show them on the taskbar instead of hiding them in the overflow menu (`^`). If you later hide one, that choice is kept. To change it, use **Settings → Personalization → Taskbar → Other system tray icons** (they're listed as *AIUsageTray*); Windows 11 doesn't always allow dragging icons out of the overflow menu.
+> The first time they appear, the icons ask Windows to show them on the taskbar instead of hiding them in the overflow menu (`^`). If you later hide one, that choice is kept. To change it, use **Settings → Personalization → Taskbar → Other system tray icons** (listed as *Claude - AI Usage*, *Codex - AI Usage* and *Cursor - AI Usage*); Windows 11 doesn't always allow dragging icons out of the overflow menu.
 
 With the MSI, the icons appear the next time you sign in, or right away from **Start menu → AI Usage Bridge → AI Usage Bridge (bandeja)**.
 

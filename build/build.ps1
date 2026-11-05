@@ -36,6 +36,8 @@ $stage = Join-Path $dist 'stage\ai-usage-bridge'
 $cache = Join-Path $root 'build\.cache'
 $WinSWUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe'
 $WinSWSha256 = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
+$RceditUrl = 'https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe'
+$RceditSha256 = '3E7801DB1A5EDBEC91B49A24A094AAD776CB4515488EA5A4CA2289C400EADE2A'
 
 function Write-Step([string]$Text) { Write-Host "`n==> $Text" -ForegroundColor Cyan }
 function Assert-Exit([string]$What) { if ($LASTEXITCODE -ne 0) { throw "$What fallo (codigo $LASTEXITCODE)" } }
@@ -91,10 +93,10 @@ Expand-Archive $pyZip "$stage\python"
 $pth = Get-ChildItem "$stage\python" -Filter 'python3*._pth' | Select-Object -First 1
 # Con ._pth, Python ignora PYTHONPATH: declaramos aca las carpetas de la app.
 Set-Content $pth.FullName -Value @("$($pth.BaseName).zip", '.', '..\app', '..\lib') -Encoding ascii
-# Ejecutable propio para la bandeja (Windows lo muestra como "AIUsageTray" en la configuracion de la barra).
-Copy-Item "$stage\python\pythonw.exe" "$stage\python\AIUsageTray.exe"
 
 # --- 4. Dependencias --------------------------------------------------------
+$pyMinor0 = ($PythonVersion -split '\.')[0..1] -join '.'
+$hostPython0 = (Get-Command py -ErrorAction SilentlyContinue) ? @('py', "-$pyMinor0") : @('python')
 Write-Step 'Dependencias'
 $pyMinor = ($PythonVersion -split '\.')[0..1] -join '.'
 $hostPython = (Get-Command py -ErrorAction SilentlyContinue) ? @('py', "-$pyMinor") : @('python')
@@ -110,6 +112,31 @@ $winsw = Get-Cached $WinSWUrl 'WinSW-x64-2.12.0.exe'
 if ((Get-FileHash $winsw -Algorithm SHA256).Hash -ne $WinSWSha256) { Remove-Item $winsw; throw 'El hash de WinSW no coincide' }
 New-Item -ItemType Directory -Force -Path "$stage\winsw" | Out-Null
 Copy-Item $winsw "$stage\winsw\WinSW-x64.exe"
+
+# --- 5b. Ejecutables de la bandeja ------------------------------------------
+# Un ejecutable por IA para que Windows muestre su nombre en "Otros iconos de la
+# bandeja del sistema". Son copias de pythonw.exe: se les quita la firma de la PSF
+# (quedaria invalida al editarlas) y se les cambia la descripcion con rcedit.
+Write-Step 'Ejecutables de la bandeja'
+$rcedit = Get-Cached $RceditUrl 'rcedit-x64-2.0.0.exe'
+if ((Get-FileHash $rcedit -Algorithm SHA256).Hash -ne $RceditSha256) { Remove-Item $rcedit; throw 'El hash de rcedit no coincide' }
+foreach ($ai in @(@('Claude', 'claude'), @('Codex', 'codex'), @('Cursor', 'cursor'))) {
+    $exe = "$stage\python\AIUsage-$($ai[0]).exe"
+    Copy-Item "$stage\python\pythonw.exe" $exe
+    & $hostPython0[0] @($hostPython0 | Select-Object -Skip 1) "$root\build\pe_strip_signature.py" $exe
+    Assert-Exit 'pe_strip_signature'
+    & $rcedit $exe `
+        --set-version-string FileDescription "$($ai[0]) - AI Usage" `
+        --set-version-string ProductName 'AI Usage Bridge' `
+        --set-version-string CompanyName 'The AI Software Factory' `
+        --set-version-string InternalName "AIUsage-$($ai[0])" `
+        --set-version-string OriginalFilename "AIUsage-$($ai[0]).exe" `
+        --set-version-string LegalCopyright 'MIT License - The AI Software Factory' `
+        --set-file-version $numericVersion --set-product-version $numericVersion
+    Assert-Exit 'rcedit'
+    $desc = (Get-Item $exe).VersionInfo.FileDescription
+    if ($desc -ne "$($ai[0]) - AI Usage") { throw "La descripcion de $exe quedo como '$desc'" }
+}
 
 # --- 6. Prueba con el Python embebido ---------------------------------------
 Write-Step 'Prueba del paquete con el Python embebido'

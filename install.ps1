@@ -166,7 +166,7 @@ try {
         Copy-Item (Join-Path $Src 'python') (Join-Path $InstallDir 'python') -Recurse
         Copy-Item (Join-Path $Src 'lib') (Join-Path $InstallDir 'lib') -Recurse
         $python = Join-Path $InstallDir 'python\python.exe'
-        $trayExe = Join-Path $InstallDir 'python\AIUsageTray.exe'
+        $trayExe = Join-Path $InstallDir 'python\pythonw.exe'
     } else {
         Write-Step 'Buscando Python 3.11 o superior'
         $python = Find-Python

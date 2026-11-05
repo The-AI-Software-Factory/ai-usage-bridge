@@ -3,7 +3,12 @@
 Corre en la sesión del usuario (no como servicio) y solo lee ``status.json``,
 que escribe el servicio. No usa credenciales ni se conecta a ningún lado.
 
-Uso: ``AIUsageTray.exe <carpeta de instalación>\\app\\ai_usage_tray.pyw``
+Cada ícono es un proceso propio con su ejecutable (``AIUsage-Claude.exe``,
+``AIUsage-Codex.exe``, ``AIUsage-Cursor.exe``), así Windows muestra el nombre de
+la IA en la configuración de la barra de tareas. Sin clave, el lanzador abre
+los que correspondan y termina.
+
+Uso: ``pythonw.exe <instalación>\\app\\ai_usage_tray.pyw [claude|codex|cursor]``
 """
 
 from __future__ import annotations
@@ -40,6 +45,10 @@ ERROR_ALREADY_EXISTS = 183
 NOTIFY_SETTINGS = r"Control Panel\NotifyIconSettings"
 PINNED_MARK = "AIUsageBridgePinned"  # marca propia: se fija una sola vez, después decide el usuario
 STOP_FILE = "tray.stop"  # el instalador lo crea para cerrar la bandeja prolijamente
+EXIT_EVENT = "Local\\AIUsageBridgeTrayExit"  # "Salir" en un ícono cierra los tres
+UIDS = {"claude": 1, "codex": 2, "cursor": 3}
+EXE_NAMES = {"claude": "AIUsage-Claude.exe", "codex": "AIUsage-Codex.exe", "cursor": "AIUsage-Cursor.exe"}
+DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP = 0x8, 0x200
 REFRESH_MS = 5000
 CMD_OPEN, CMD_REFRESH, CMD_CONFIG, CMD_LOGS, CMD_EXIT = 1, 2, 3, 4, 5
 
@@ -83,11 +92,19 @@ shell32.Shell_NotifyIconW.argtypes = [w.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
 shell32.Shell_NotifyIconW.restype = w.BOOL
 kernel32.CreateMutexW.argtypes = [w.LPVOID, w.BOOL, w.LPCWSTR]
 kernel32.CreateMutexW.restype = w.HANDLE
+kernel32.CreateEventW.argtypes = [w.LPVOID, w.BOOL, w.BOOL, w.LPCWSTR]
+kernel32.CreateEventW.restype = w.HANDLE
+kernel32.SetEvent.argtypes = [w.HANDLE]
+kernel32.WaitForSingleObject.argtypes = [w.HANDLE, w.DWORD]
+kernel32.WaitForSingleObject.restype = w.DWORD
 
 
 class Tray:
-    def __init__(self, install_dir: Path):
+    def __init__(self, install_dir: Path, only: str | None = None):
         self.install_dir = install_dir
+        self.only = only
+        # Evento compartido: lo abren todos los procesos de la bandeja de esta sesión.
+        self.exit_event = kernel32.CreateEventW(None, True, False, EXIT_EVENT)
         self.status_path = install_dir / "status.json"
         self.icon_dir = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "AIUsageBridge" / "icons"
         self.icon_dir.mkdir(parents=True, exist_ok=True)
@@ -121,7 +138,8 @@ class Tray:
         tray = (self.status or {}).get("tray") or {}
         show = tray.get("show") or ["claude", "codex", "cursor"]
         providers = (self.status or {}).get("providers") or {}
-        return [k for k in show if not providers or k in providers]
+        wanted = [k for k in show if not providers or k in providers]
+        return [k for k in wanted if k == self.only] if self.only else wanted
 
     # ------------------------------------------------------------ íconos
     def _icon_handle(self, key: str, item: dict | None, stale: bool) -> int:
@@ -146,9 +164,10 @@ class Tray:
         wanted = self._wanted()
         # Quita íconos que ya no corresponden (por ejemplo, si cambió "show").
         for uid in list(self.shown):
-            if uid > len(wanted) or self.shown[uid] != wanted[uid - 1]:
+            if self.shown[uid] not in wanted:
                 self._remove(uid)
-        for index, key in enumerate(wanted, start=1):
+        for key in wanted:
+            index = UIDS.get(key, 10 + len(key))  # uID fijo por IA: Windows recuerda cada ícono
             item = providers.get(key)
             tip = tray_render.tooltip(key, item, best, stale)
             signature = (tray_render.icon_text(item), stale, tray_render.level_color(item and item.get("margin")), tip)
@@ -186,7 +205,7 @@ class Tray:
             self.pin_pending = False
             return
         exe = Path(sys.executable).name.lower()
-        if exe != "aiusagetray.exe":
+        if not (exe.startswith("aiusage-") and exe.endswith(".exe")):
             self.pin_pending = False  # solo con el ejecutable propio (no tocar otras apps de Python)
             return
         changed = []
@@ -278,6 +297,8 @@ class Tray:
         elif cmd == CMD_LOGS:
             subprocess.Popen(["explorer.exe", str(self.install_dir / "logs")])
         elif cmd == CMD_EXIT:
+            if self.exit_event:
+                kernel32.SetEvent(self.exit_event)  # los otros íconos se cierran en el próximo ciclo
             user32.DestroyWindow(self.hwnd)
 
     def _open_dashboard(self) -> None:
@@ -294,7 +315,8 @@ class Tray:
                 self._menu()
             return 0
         if msg == WM_TIMER:
-            if (self.install_dir / STOP_FILE).exists():
+            exiting = self.exit_event and kernel32.WaitForSingleObject(self.exit_event, 0) == 0
+            if exiting or (self.install_dir / STOP_FILE).exists():
                 user32.DestroyWindow(hwnd)  # actualización o desinstalación en curso
                 return 0
             self.refresh()
@@ -332,22 +354,42 @@ class Tray:
         return 0
 
 
+def _tray_config(install_dir: Path) -> dict:
+    try:
+        return json.loads((install_dir / "status.json").read_text(encoding="utf-8")).get("tray") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def launch_all(install_dir: Path) -> int:
+    """Abre un proceso por IA (cada uno con su ejecutable) y termina."""
+    cfg = _tray_config(install_dir)
+    if cfg.get("enabled") is False:
+        return 0
+    script = install_dir / "app" / "ai_usage_tray.pyw"
+    for key in cfg.get("show") or ["claude", "codex", "cursor"]:
+        exe = install_dir / "python" / EXE_NAMES.get(key, "")
+        if not exe.is_file():
+            exe = Path(sys.executable)  # instalación sin Python embebido
+        subprocess.Popen([str(exe), str(script), key], close_fds=True,
+                         creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     install_dir = Path(argv[0]) if argv else Path(__file__).resolve().parents[2]
-    # Una sola instancia por usuario.
-    kernel32.CreateMutexW(None, False, "Local\\AIUsageBridgeTray")
+    only = argv[1].lower() if len(argv) > 1 else None
+    if only is None:
+        return launch_all(install_dir)
+    # Una sola instancia por IA y por usuario.
+    kernel32.CreateMutexW(None, False, f"Local\\AIUsageBridgeTray-{only}")
     if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
         return 0
     try:  # íconos nítidos con escalado de pantalla
         user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
     except (AttributeError, OSError):
         pass
-    status = install_dir / "status.json"
-    try:
-        tray_cfg = json.loads(status.read_text(encoding="utf-8")).get("tray", {})
-        if tray_cfg.get("enabled") is False:
-            return 0
-    except (OSError, ValueError):
-        pass
-    return Tray(install_dir).run()
+    if _tray_config(install_dir).get("enabled") is False:
+        return 0
+    return Tray(install_dir, only).run()
